@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Glass Landing</title>
-  <link rel="stylesheet" href="/styles.css" />
-  <script src="/script.js" defer></script>
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="./script.js" defer></script>
 </head>
 <body>
   <div class="bg-scene">
@@ -15,9 +15,9 @@
     <div class="bg-light light-3"></div>
 
     <div class="bg-illustrations">
-      <img src="/resource/bg-long-1.png" alt="bg1" class="moving-image img-1" />
-      <img src="/resource/bg-long-2.png" alt="bg2" class="moving-image img-2" />
-      <img src="/resource/bg-long-3.png" alt="bg3" class="moving-image img-3" />
+      <img src="../resource/bg-long-1.png" alt="bg1" class="moving-image img-1" />
+      <img src="../resource/bg-long-2.png" alt="bg2" class="moving-image img-2" />
+      <img src="../resource/bg-long-3.png" alt="bg3" class="moving-image img-3" />
     </div>
 
     <div class="mist mist-1"></div>
@@ -26,6 +26,9 @@
 
   <div class="app-shell">
     <div class="main-panel">
+      <!-- 모바일 사이드바 딤 오버레이 -->
+      <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
           <div class="sidebar-label" id="homeBtn" style="cursor: pointer;" title="메인으로 돌아가기">ARCHIVE</div>
@@ -46,9 +49,9 @@
             <button class="theme-swatch" data-theme="default" style="background: #bcd3e6;" title="기본(스카이블루)"></button>
             <button class="theme-swatch" data-theme="dark" style="background: #1f2937;" title="다크 모드"></button>
             <button class="theme-swatch" data-theme="green" style="background: #a8d5ba;" title="포레스트 그린"></button>
-            <button class="theme-swatch" data-theme="photo1" style="background: url('/resource/bg-long-1.png') center/cover;" title="배경 1"></button>
-            <button class="theme-swatch" data-theme="photo2" style="background: url('/resource/bg-long-2.png') center/cover;" title="배경 2"></button>
-            <button class="theme-swatch" data-theme="photo3" style="background: url('/resource/bg-long-3.png') center/cover;" title="배경 3"></button>
+            <button class="theme-swatch" data-theme="photo1" style="background: url('../resource/bg-long-1.png') center/cover;" title="배경 1"></button>
+            <button class="theme-swatch" data-theme="photo2" style="background: url('../resource/bg-long-2.png') center/cover;" title="배경 2"></button>
+            <button class="theme-swatch" data-theme="photo3" style="background: url('../resource/bg-long-3.png') center/cover;" title="배경 3"></button>
           </div>
 
           <button class="footer-icon-btn" id="themeBtn" title="테마 변경">

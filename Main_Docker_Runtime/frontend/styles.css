@@ -46,8 +46,9 @@ body[data-theme="photo3"] .bg-gradient { background: url('/resource/bg-long-3.pn
 
 
 /* FOREGROUND APP */
-.app-shell { position: relative; z-index: 10; height: 100vh; padding: 28px; }
-.main-panel { width: 100%; height: calc(100vh - 56px); display: flex; overflow: hidden; border: 1px solid rgba(255,255,255,0.34); border-radius: 32px; background: rgba(255,255,255,0.14); backdrop-filter: blur(22px); -webkit-backdrop-filter: blur(22px); box-shadow: 0 24px 80px rgba(24, 39, 75, 0.18), inset 0 1px 0 rgba(255,255,255,0.28); }
+/* [수정됨] 구형 브라우저 호환을 위해 100vh를 남겨두고, 모바일 네비게이션 바 가림 현상을 해결하기 위해 그 아래에 100dvh(동적 뷰포트 높이) 덮어쓰기 추가 */
+.app-shell { position: relative; z-index: 10; height: 100vh; height: 100dvh; padding: 28px; }
+.main-panel { width: 100%; height: calc(100vh - 56px); height: calc(100dvh - 56px); display: flex; overflow: hidden; border: 1px solid rgba(255,255,255,0.34); border-radius: 32px; background: rgba(255,255,255,0.14); backdrop-filter: blur(22px); -webkit-backdrop-filter: blur(22px); box-shadow: 0 24px 80px rgba(24, 39, 75, 0.18), inset 0 1px 0 rgba(255,255,255,0.28); }
 
 /* 사이드바 */
 .sidebar { width: 280px; flex-shrink: 0; display: flex; flex-direction: column; padding: 22px 18px; border-right: 1px solid rgba(255,255,255,0.20); background: rgba(255,255,255,0.08); transition: width 0.3s ease, padding 0.3s ease, opacity 0.3s ease; overflow: hidden; white-space: nowrap; }
@@ -179,3 +180,192 @@ body[data-theme="dark"] .chat-box textarea::-webkit-scrollbar-thumb:active {
 @keyframes moveRightToLeft1 { 0% { transform: translateX(110vw); } 100% { transform: translateX(-140%); } }
 @keyframes moveRightToLeft2 { 0% { transform: translateX(120vw); } 100% { transform: translateX(-150%); } }
 @keyframes moveLeftToRight { 0% { transform: translateX(-140%); } 100% { transform: translateX(110vw); } }
+
+/* ============================================================
+   [추가됨] 여기서부터 모바일 및 반응형 로직 시작
+   ============================================================ */
+
+/* [추가됨] 모바일 사이드바 오픈 시 배경을 어둡게 덮어주는 오버레이 (Drawer UI용) */
+.sidebar-overlay {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.sidebar-overlay.show { opacity: 1; }
+
+/* ============================================================
+   [추가됨] RESPONSIVE BREAKPOINTS (반응형 분기점 설정)
+   - Tablet  : max-width 1024px
+   - Mobile  : max-width 768px
+   - Small   : max-width 480px
+   ============================================================ */
+
+/* [추가됨] ── Tablet (≤ 1024px) ── */
+@media (max-width: 1024px) {
+  .app-shell { padding: 18px; }
+  /* [수정됨] 100dvh 적용 */
+  .main-panel { border-radius: 24px; height: calc(100vh - 36px); height: calc(100dvh - 36px); }
+
+  .sidebar { width: 240px; padding: 18px 14px; }
+  .sidebar-title { font-size: 24px; }
+
+  .hero h1 { font-size: 48px; }
+  .hero p { font-size: 17px; }
+
+  .page-section h2 { font-size: 30px; }
+  .page-section p { font-size: 16px; }
+
+  .top-bar { padding: 16px 22px; }
+}
+
+/* [추가됨] ── Mobile (≤ 768px) ── */
+@media (max-width: 768px) {
+  .app-shell { padding: 10px; }
+  
+  /* [수정됨] 모바일 하단바 영역 확보를 위해 100dvh 추가 반영 */
+  .main-panel {
+    border-radius: 20px;
+    height: calc(100vh - 20px);
+    height: calc(100dvh - 20px);
+    position: relative;
+  }
+
+  /* 배경 조명 크기 축소 */
+  .light-1 { width: 220px; height: 220px; }
+  .light-2 { width: 260px; height: 260px; }
+  .light-3 { width: 280px; height: 280px; }
+
+  /* 배경 이미지 높이 축소 */
+  .img-1 { height: 160px; }
+  .img-2 { height: 140px; }
+  .img-3 { height: 160px; }
+
+  /* 사이드바 → 드로어 방식(화면 왼쪽에서 튀어나오는 형태)으로 변경 */
+  .sidebar {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    width: 0;
+    padding: 0;
+    opacity: 0;
+    z-index: 50;
+    border-right: none;
+    border-radius: 20px 0 0 20px;
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.12);
+    white-space: nowrap;
+    overflow: hidden;
+    transition: width 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+                padding 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.28s ease;
+  }
+  .sidebar.open {
+    width: 280px;
+    padding: 22px 18px;
+    opacity: 1;
+  }
+  .sidebar.collapsed {
+    width: 0;
+    padding: 0;
+    opacity: 0;
+    border-right: none;
+  }
+
+  /* 모바일에서 오버레이 활성화 */
+  .sidebar-overlay { display: block; }
+
+  /* 탑바 여백 축소 */
+  .top-bar { padding: 12px 16px; }
+
+  /* 히어로(대문) 영역 폰트/여백 조정. 모바일 입력창에 텍스트가 가려지지 않게 함 */
+  .hero { margin-bottom: 80px; padding: 0 16px; }
+  .hero h1 { font-size: 36px; letter-spacing: -0.03em; }
+  .hero p { font-size: 15px; line-height: 1.7; margin-top: 16px; }
+  .hero-label { font-size: 11px; letter-spacing: 0.3em; }
+
+  /* 일반 페이지 섹션 여백/폰트 조정 */
+  .page-section { padding: 28px 16px; }
+  .page-section h2 { font-size: 26px; }
+  .page-section p { font-size: 15px; }
+
+  /* 채팅 히스토리 간격 조정 */
+  .chat-history { padding: 0 12px; gap: 16px; }
+
+  /* 메시지 말풍선 최대 너비를 88%로 늘리고 폰트 축소 */
+  .message { max-width: 88%; padding: 13px 16px; font-size: 14px; }
+
+  /* [수정됨] 하단 입력창 크기 및 여백 모바일 축소, env(safe-area-inset-bottom)를 적용해 아이폰 하단 홈 인디케이터에 입력창이 겹치지 않도록 조치 */
+  .chat-wrap { padding: 0 10px calc(16px + env(safe-area-inset-bottom)) 10px; }
+  .chat-box { gap: 8px; padding: 8px; border-radius: 22px; }
+  .chat-box textarea {
+    min-height: 46px;
+    padding: 12px 10px;
+    font-size: 15px;
+    border-radius: 16px;
+  }
+  .chat-box button#sendBtn {
+    height: 46px;
+    padding: 0 16px;
+    font-size: 13px;
+    border-radius: 14px;
+  }
+  .chat-box.expanded textarea { min-height: 120px; }
+
+  /* 테마 변경 팝업 위치를 모바일에서는 화면 하단 중앙으로 이동 */
+  .theme-popup {
+    left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    bottom: 70px;
+  }
+  .theme-popup.show { transform: translateX(-50%) translateY(0); }
+
+  /* 다크 테마일 때 모바일 사이드바 배경색 지정 */
+  body[data-theme="dark"] .sidebar { background: rgba(17,24,39,1); }
+}
+
+/* [추가됨] ── Small phones (≤ 480px) ── */
+@media (max-width: 480px) {
+  .app-shell { padding: 6px; }
+  /* [수정됨] 100dvh 적용 */
+  .main-panel { border-radius: 16px; height: calc(100vh - 12px); height: calc(100dvh - 12px); }
+
+  .hero h1 { font-size: 28px; }
+  .hero p { font-size: 14px; }
+
+  .message { max-width: 94%; padding: 11px 14px; font-size: 13px; }
+
+  .chat-box { border-radius: 18px; padding: 7px; }
+  .chat-box textarea { font-size: 14px; padding: 10px 8px; min-height: 42px; }
+  .chat-box button#sendBtn { height: 42px; padding: 0 13px; font-size: 12px; border-radius: 12px; }
+
+  /* 작은 화면에서는 입력창 확장 버튼을 숨김 */
+  .expand-btn { display: none; }
+
+  /* 사이드바 오픈 시 전체 화면 너비를 덮도록 100% 지정 */
+  .sidebar.open { width: 100%; border-radius: 0; }
+}
+
+/* [추가됨] ── 가로 모드 모바일 (landscape) ── */
+@media (max-width: 896px) and (orientation: landscape) {
+  .app-shell { padding: 8px; }
+  /* [수정됨] 100dvh 적용 */
+  .main-panel { height: calc(100vh - 16px); height: calc(100dvh - 16px); border-radius: 18px; }
+
+  .hero { margin-bottom: 60px; }
+  .hero h1 { font-size: 32px; }
+  .hero p { font-size: 14px; margin-top: 10px; }
+
+  /* [수정됨] 가로모드에서도 안전 영역 하단 패딩 확보 */
+  .chat-wrap { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .chat-box textarea { min-height: 42px; }
+  .chat-box button#sendBtn { height: 42px; }
+}

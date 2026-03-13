@@ -31,12 +31,13 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentSessionId = null;
   let isReceiving = false;
 
+  const sidebarOverlay = document.getElementById('sidebarOverlay');
+  const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
 
   // =========================================================
   // 2. 외부 API (Backend Hooks) - 함수 순서 재배치
   // =========================================================
   const BackendHooks = {
-    // 세션 목록 조회
     async fetchSessionList() {
       console.log("[Backend] 과거 세션 목록 데이터 요청");
       return new Promise(resolve => setTimeout(() => resolve([
@@ -45,13 +46,9 @@ document.addEventListener('DOMContentLoaded', () => {
       ]), 300));
     },
 
-    // 새 세션 생성
     async createSession(firstMessage) {
       console.log("[Backend] 새 세션 생성 요청:", firstMessage);
-
       const newSessionId = 'session_' + Math.random().toString(36).substr(2, 9);
-
-      // 실제 서비스에서는 여기서 LLM / DB 로 title 생성
       const generatedTitle = firstMessage.length > 20
         ? firstMessage.substring(0, 20) + "..."
         : firstMessage;
@@ -62,7 +59,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }), 200));
     },
 
-    // 과거 대화 내역 조회
     async fetchChatHistory(sessionId) {
       console.log("[Backend] 과거 대화 불러오기 요청 ID:", sessionId);
       return new Promise(resolve => setTimeout(() => resolve([
@@ -71,10 +67,8 @@ document.addEventListener('DOMContentLoaded', () => {
       ]), 400));
     },
 
-    // 메시지 전송 및 스트리밍 응답 수신
     async sendMessage(sessionId, message, onChunkReceived, onCompleted) {
       console.log(`[Backend] 메시지 전송 (${sessionId}):`, message);
-      
       setTimeout(() => {
         const dummyResponse = "모든 버튼과 라우팅이 정상적으로 연결되었습니다. 백엔드 구현 시 해당 세션에 메시지가 저장됩니다.";
         let currentText = "";
@@ -93,25 +87,21 @@ document.addEventListener('DOMContentLoaded', () => {
       }, 1000);
     },
 
-    // 설정 데이터 조회
     async fetchSettings() {
       console.log("[Backend] 사용자 설정 데이터 요청");
       return new Promise(resolve => setTimeout(() => resolve({ status: 'success', data: '설정 페이지입니다. (DB 연동 대기 중)' }), 200));
     },
 
-    // 계정 정보 조회
     async fetchAccountInfo() {
       console.log("[Backend] 사용자 계정 정보 요청");
       return new Promise(resolve => setTimeout(() => resolve({ status: 'success', data: '계정 관리 페이지입니다. (DB 연동 대기 중)' }), 200));
     },
 
-    // 도움말 데이터 조회
     async fetchHelpData() {
       console.log("[Backend] 도움말 및 가이드 데이터 요청");
       return new Promise(resolve => setTimeout(() => resolve({ status: 'success', data: '도움말 가이드라인 페이지입니다.' }), 200));
     },
 
-    // 테마 설정 저장
     async saveThemePreference(themeName) {
       console.log(`[Backend] 사용자 테마 취향 저장: ${themeName}`);
       return new Promise(resolve => setTimeout(() => resolve({ status: 'success' }), 100));
@@ -186,8 +176,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================
   // 4. UI 렌더링 및 유틸리티 함수
   // =========================================================
-  
-  // 입력창 자동 높이 조절
   function adjustTextareaHeight() {
     if(chatBox.classList.contains('expanded')) return;
     chatInput.style.height = '54px';
@@ -200,7 +188,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 로딩 인디케이터 표시
   function showLoadingIndicator() {
     const loadingId = 'loading-' + Date.now();
     const rowDiv = document.createElement('div');
@@ -218,13 +205,11 @@ document.addEventListener('DOMContentLoaded', () => {
     return loadingId;
   }
 
-  // 로딩 인디케이터 제거
   function removeLoadingIndicator(id) {
     const loadingEl = document.getElementById(id);
     if(loadingEl) loadingEl.remove();
   }
 
-  // 채팅 메시지 말풍선 생성 및 추가
   function appendMessage(text, sender, isStreaming = false) {
     const rowDiv = document.createElement('div');
     rowDiv.className = `message-row ${sender}`;
@@ -234,7 +219,6 @@ document.addEventListener('DOMContentLoaded', () => {
     msgDiv.textContent = text;
     rowDiv.appendChild(msgDiv);
 
-    // 복사 버튼 추가
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'message-actions';
     const copyBtn = document.createElement('button');
@@ -274,7 +258,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return rowDiv; 
   }
 
-  // 사이드바 아이템 렌더링
   function renderSidebarItem(title, sessionId, isPrepend = true) {
     const newBtn = document.createElement('button');
     newBtn.classList.add('sidebar-item');
@@ -304,17 +287,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let isNewSession = false;
 
-    // 새 대화인 경우 세션 생성
     if (!currentSessionId) {
         const session = await BackendHooks.createSession(text);
-
         currentSessionId = session.id;
-
         renderSidebarItem(session.title, session.id, true);
       isNewSession = true;
     }
 
-    // 신규 세션은 hashchange 이벤트 없이 URL만 조용히 업데이트
     if (isNewSession) {
       history.pushState(null, '', `#/chat/${currentSessionId}`);
       switchView('chat'); 
@@ -330,7 +309,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     let botMsgDiv = null;
 
-    // 백엔드 통신 및 스트리밍 처리
     await BackendHooks.sendMessage(
       currentSessionId, 
       text, 
@@ -353,8 +331,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================
   // 6. 이벤트 바인딩 및 초기화
   // =========================================================
-  
-  // 앱 초기 데이터 로드
   async function init() {
     sidebarList.innerHTML = '';
     const sessions = await BackendHooks.fetchSessionList();
@@ -363,28 +339,87 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 윈도우 이벤트
   window.addEventListener('hashchange', router);
   window.addEventListener('load', router);
+  menuToggle.addEventListener('click', toggleSidebar);
 
-  // 상단 헤더 이벤트
-  menuToggle.addEventListener('click', () => sidebar.classList.toggle('collapsed'));
+  function openSidebar() {
+    if (isMobile()) {
+      sidebar.classList.add('open');
+      if (sidebarOverlay) {
+        sidebarOverlay.style.display = 'block';
+        requestAnimationFrame(() => sidebarOverlay.classList.add('show'));
+      }
+    } else {
+      sidebar.classList.remove('collapsed');
+    }
+  }
+
+  function closeSidebar() {
+    if (isMobile()) {
+      sidebar.classList.remove('open');
+      if (sidebarOverlay) {
+        sidebarOverlay.classList.remove('show');
+        setTimeout(() => { sidebarOverlay.style.display = 'none'; }, 300);
+      }
+    } else {
+      sidebar.classList.add('collapsed');
+    }
+  }
+
+  function toggleSidebar() {
+    if (isMobile()) {
+      sidebar.classList.contains('open') ? closeSidebar() : openSidebar();
+    } else {
+      sidebar.classList.contains('collapsed') ? openSidebar() : closeSidebar();
+    }
+  }
+
+  window.addEventListener('resize', () => {
+    if (!isMobile()) {
+      sidebar.classList.remove('open');
+      if (sidebarOverlay) {
+        sidebarOverlay.classList.remove('show');
+        sidebarOverlay.style.display = 'none';
+      }
+    }
+  });
+
+  if (sidebarOverlay) {
+    sidebarOverlay.addEventListener('click', closeSidebar);
+  }
+  
+  // [수정됨] isMobile() 로 올바르게 함수 호출
+  sidebarList.addEventListener('click', (e) => {
+    if (isMobile()) closeSidebar();
+  });
   
   homeBtn.addEventListener('click', () => {
+    if (isMobile()) closeSidebar(); // [수정됨]
     if(!isReceiving) window.location.hash = '#/';
   });
 
   newChatBtn.addEventListener('click', () => {
+    if (isMobile()) closeSidebar(); // [수정됨]
     if(isReceiving) return;
     window.location.hash = '#/';
   });
 
-  // 하단 메뉴 이벤트
-  settingsBtn.addEventListener('click', () => window.location.hash = '#/settings');
-  accountBtn.addEventListener('click', () => window.location.hash = '#/account');
-  helpBtn.addEventListener('click', () => window.location.hash = '#/help');
+  settingsBtn.addEventListener('click', () => {
+    if (isMobile()) closeSidebar(); // [수정됨]
+    window.location.hash = '#/settings';
+  });
+  
+  accountBtn.addEventListener('click', () => {
+    if (isMobile()) closeSidebar(); // [수정됨]
+    window.location.hash = '#/account';
+  });
+  
+  helpBtn.addEventListener('click', () => {
+    if (isMobile()) closeSidebar(); // [수정됨]
+    window.location.hash = '#/help';
+  });
 
-  // 테마 관리 이벤트
   themeBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     themePopup.classList.toggle('show');
@@ -404,7 +439,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 텍스트 영역 이벤트
   chatInput.addEventListener('input', adjustTextareaHeight);
   
   expandBtn.addEventListener('click', () => {
@@ -413,7 +447,6 @@ document.addEventListener('DOMContentLoaded', () => {
     else adjustTextareaHeight();
   });
 
-  // 메시지 전송 이벤트 (엔터 키 및 클릭)
   chatInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
@@ -423,6 +456,5 @@ document.addEventListener('DOMContentLoaded', () => {
   
   sendBtn.addEventListener('click', handleSend);
 
-  // 초기화 함수 실행
   init();
 });
