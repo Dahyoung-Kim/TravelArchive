@@ -3,36 +3,51 @@ import sys
 import random
 import asyncio
 import uuid
-from typing import List, Dict
+from typing import List, Dict, Optional
 from dotenv import load_dotenv
 
+# ==========================================
+# 기본 경로 및 업로드/다운로드 폴더 설정 (요청 3, 4 반영)
+# ==========================================
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
+
+# 파일이 저장될 폴더 및 다운로드 기록이 저장될 폴더를 최상단 변수로 뺌
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+EXPORT_DIR = os.path.join(BASE_DIR, "exports")
+
+# 폴더가 없으면 자동 생성
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(EXPORT_DIR, exist_ok=True)
 
 load_dotenv(os.path.join(BASE_DIR, "setting", ".env"))
 
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from fastapi import FastAPI
+from fastapi.responses import FileResponse, StreamingResponse, PlainTextResponse
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from test_agent import TestNode
+from session_container import SessionContainer
 
 testNode = TestNode()
 
-
 app = FastAPI(title="Chatbot Middle-end API")
 
-# CORS 설정 (프론트엔드와 포트가 다를 경우를 대비)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # 실제 운영시에는 프론트엔드 도메인으로 제한하는 것이 좋습니다.
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ==========================================
+# 전역 상태 관리 (인메모리 세션 컨테이너)
+# ==========================================
+active_sessions: Dict[str, SessionContainer] = {}
+current_active_session_id: Optional[str] = None
 
 # ==========================================
 # Pydantic 데이터 모델
@@ -46,76 +61,75 @@ class MessageRequest(BaseModel):
 class ThemeRequest(BaseModel):
     theme: str
 
-# ==========================================
-# 임시 메모리 DB (실제 구현 시 RDBMS/NoSQL 연동 필요)
-# ==========================================
-sessions_db = [
-    {"id": "session_1", "title": "오사카 3박 4일 일정"},
-    {"id": "session_2", "title": "제주도 여행 코스"}
-]
-
-chat_history_db: Dict[str, List[Dict[str, str]]] = {
-    "session_1": [{"role": "user", "content": "오사카 일정 짜줘"}, {"role": "bot", "content": "네, 오사카 3박 4일 일정을 안내해 드릴게요."}],
-    "session_2": [{"role": "user", "content": "제주도 여행 코스 추천해줘"}, {"role": "bot", "content": "제주도 여행 코스를 추천해 드립니다."}]
-}
+class TitleUpdateRequest(BaseModel):
+    title: str
 
 # ==========================================
-# API 라우터 (프론트엔드 BackendHooks 매칭)
+# API 라우터
 # ==========================================
 
 @app.get("/api/sessions")
 async def get_session_list():
-    """과거 세션 목록 데이터 요청"""
-    return sessions_db
+    """과거 세션 목록 데이터를 요청합니다."""
+    return await mock_db_get_session_list()
 
 @app.post("/api/sessions")
 async def create_session(req: SessionCreateRequest):
-    """새 세션 생성 요청"""
-    new_id = f"session_{uuid.uuid4().hex[:9]}"
-    title = req.first_message[:20] + "..." if len(req.first_message) > 20 else req.first_message
+    """새 세션 생성 요청을 처리하고 컨테이너를 초기화합니다."""
+    global current_active_session_id
     
-    new_session = {"id": new_id, "title": title}
-    sessions_db.insert(0, new_session) # 최신 세션을 맨 앞으로
-    chat_history_db[new_id] = []
+    if current_active_session_id and current_active_session_id in active_sessions:
+        await active_sessions[current_active_session_id].teardown()
+        del active_sessions[current_active_session_id]
+        
+    new_session_data = await mock_db_create_session(req.first_message)
+    new_id = new_session_data["id"]
     
-    return new_session
+    new_container = SessionContainer(
+        session_id=new_id, 
+        user_id="default_user", 
+        db_interface=MockDBInterface()
+    )
+    await new_container.initialize_session(is_new=True)
+    
+    active_sessions[new_id] = new_container
+    current_active_session_id = new_id
+    
+    return new_session_data
 
 @app.get("/api/sessions/{session_id}/history")
 async def get_chat_history(session_id: str):
-    """과거 대화 불러오기 요청"""
-    return chat_history_db.get(session_id, [])
-
-# @app.post("/api/sessions/{session_id}/message")
-# async def send_message(session_id: str, req: MessageRequest):
-#     """메시지 전송 및 스트리밍 응답 (Server-Sent Events 또는 Plain Chunk)"""
+    """지정된 세션의 과거 대화 내역을 조회합니다."""
+    if session_id in active_sessions:
+        return await active_sessions[session_id].get_full_history()
     
-#     # 1. 사용자 메시지 DB 저장
-#     if session_id not in chat_history_db:
-#         chat_history_db[session_id] = []
-#     chat_history_db[session_id].append({"role": "user", "content": req.message})
-#
-#     # 2. 스트리밍 제너레이터 함수
-#     async def response_generator():
-#         # 실제 연동 시 이곳에 OpenAI, Gemini 등의 LLM 스트리밍 API를 호출합니다.
-#         dummy_response = f"FastAPI 서버에서 '{req.message}'에 대한 응답을 스트리밍 중입니다. 프론트엔드와 성공적으로 연결되었습니다."
-#        
-#         for char in dummy_response:
-#             yield char
-#             await asyncio.sleep(0.03) # 타이핑 효과 시뮬레이션
-#            
-#         # 3. 봇 응답 완료 후 DB 저장
-#         chat_history_db[session_id].append({"role": "bot", "content": dummy_response})
-#
-#     # 미디어 타입을 text/plain 혹은 text/event-stream으로 설정하여 청크 단위 전송
-#     return StreamingResponse(response_generator(), media_type="text/plain")
+    return await mock_db_get_chat_history(session_id)
 
 @app.post("/api/sessions/{session_id}/message")
 async def send_message(session_id: str, req: MessageRequest):
-    """메시지 전송 및 스트리밍 응답 (외부 함수 호출 방식)"""
+    """메시지를 수신하고 컨테이너 파이프라인을 거쳐 결과를 스트리밍합니다."""
+    global current_active_session_id
+    
+    if current_active_session_id != session_id:
+        if current_active_session_id and current_active_session_id in active_sessions:
+            await active_sessions[current_active_session_id].teardown()
+            del active_sessions[current_active_session_id]
+            
+        if session_id not in active_sessions:
+            new_container = SessionContainer(
+                session_id=session_id, 
+                user_id="default_user", 
+                db_interface=MockDBInterface()
+            )
+            await new_container.initialize_session(is_new=False)
+            active_sessions[session_id] = new_container
+            
+        current_active_session_id = session_id
+        
+    container = active_sessions[session_id]
+
     async def response_generator():
-
-        response_text = await testNode.ask(req.message)
-
+        response_text = await container.process_user_input(req.message)
         for char in response_text:
             yield char
             await asyncio.sleep(0.03)
@@ -141,26 +155,137 @@ async def save_theme_preference(req: ThemeRequest):
 
 @app.get("/api/weather")
 async def get_weather():
-    # 1. 4가지 날씨 중 하나를 무작위로 뽑습니다.
     weather_types = ['clear', 'cloudy', 'rain', 'night']
     selected_weather = random.choice(weather_types)
     
-    # 2. 파라미터도 각각 어울리는 범위 내에서 무작위로 생성합니다.
     return {
         "type": selected_weather,
         "params": {
-            "intensity": round(random.uniform(0.2, 1.5), 2),      # 0.2 ~ 1.5 사이의 비 굵기
-            "windDirection": round(random.uniform(-1.0, 1.0), 2), # -1.0(좌풍) ~ 1.0(우풍)
-            "cloudDensity": random.randint(3, 10),                # 3개 ~ 10개 사이의 구름
-            "starDensity": random.randint(100, 300)               # 100개 ~ 300개 사이의 별
+            "intensity": round(random.uniform(0.2, 1.5), 2),
+            "windDirection": round(random.uniform(-1.0, 1.0), 2),
+            "cloudDensity": random.randint(3, 10),
+            "starDensity": random.randint(100, 300)
         }
     }
-    
-    
-    
-    
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# ==========================================
+# 신규 프론트엔드 연동 API (이름 변경, 다운로드, 파일업로드)
+# ==========================================
+
+@app.put("/api/sessions/{session_id}/title")
+async def update_session_title(session_id: str, req: TitleUpdateRequest):
+    """세션 이름 변경 API (요청 1 반영: 수동 변경 플래그 활성화)"""
+    print(f"[Backend] 세션 {session_id} 수동 이름 변경: {req.title}")
+    
+    for s in mock_sessions_db:
+        if s["id"] == session_id:
+            s["title"] = req.title
+            break
+            
+    if session_id in mock_session_meta_db:
+        mock_session_meta_db[session_id]["name"] = req.title
+        # 수동 변경 플래그 True로 갱신
+        mock_session_meta_db[session_id]["is_manual_title"] = True
+        
+    # 현재 활성화된 세션 컨테이너가 있다면 내부 상태도 즉시 동기화
+    if session_id in active_sessions:
+        active_sessions[session_id].session_name = req.title
+        active_sessions[session_id].is_manual_title = True
+        
+    return {"success": True, "title": req.title}
+
+@app.get("/api/sessions/{session_id}/download")
+async def download_chat(session_id: str):
+    """채팅 내용 다운로드 API (요청 4 반영: 주제와 대화 전체를 txt로)"""
+    print(f"[Backend] 세션 {session_id} 다운로드 요청")
+    
+    topic = "주제 없음"
+    history = []
+    
+    if session_id in active_sessions:
+        history = await active_sessions[session_id].get_full_history()
+        topic = active_sessions[session_id].session_topic
+    else:
+        history = await mock_db_get_chat_history(session_id)
+        meta = mock_session_meta_db.get(session_id, {})
+        topic = meta.get("topic", "주제 없음")
+        
+    # 다운로드할 텍스트 파일 포맷팅 구성
+    content = f"--- 대화 기록 ({session_id}) ---\n"
+    content += f"세션 주제: {topic}\n\n"
+    for msg in history:
+        role = "사용자" if msg["role"] == "user" else "봇"
+        content += f"[{role}]\n{msg['content']}\n\n"
+        
+    # 지정한 EXPORT_DIR 폴더에 파일 저장 복사본 생성 (선택적)
+    export_file_path = os.path.join(EXPORT_DIR, f"chat_{session_id}.txt")
+    with open(export_file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+        
+    headers = {
+        "Content-Disposition": f"attachment; filename=chat_{session_id}.txt"
+    }
+    return PlainTextResponse(content, headers=headers)
+
+@app.post("/api/sessions/{session_id}/files")
+async def upload_files(session_id: str, files: List[UploadFile] = File(...)):
+    """파일 업로드 API"""
+    file_names = []
+    for file in files:
+        # 실제 서버의 UPLOAD_DIR 폴더에 파일 저장
+        file_location = os.path.join(UPLOAD_DIR, file.filename)
+        with open(file_location, "wb+") as file_object:
+            file_object.write(await file.read())
+        file_names.append(file.filename)
+        
+    print(f"[Backend] 세션 {session_id} 파일 업로드 수신 및 저장 완료:", file_names)
+    
+    upload_msg = f"파일 첨부 완료: {', '.join(file_names)}"
+    
+    if session_id in active_sessions:
+        # 수정된 부분: db_interface -> db
+        await active_sessions[session_id].db.append_messages(
+            session_id, [{"role": "user", "content": f"[파일업로드] {upload_msg}"}]
+        )
+    else:
+        if session_id not in mock_chat_history_db:
+            mock_chat_history_db[session_id] = []
+        mock_chat_history_db[session_id].append({"role": "user", "content": f"[파일업로드] {upload_msg}"})
+        
+    return {"success": True, "uploaded_files": file_names}
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """대화 세션 삭제 API (Mock DB 및 메모리에서 완전 삭제)"""
+    global current_active_session_id
+    print(f"[Backend] 세션 {session_id} 삭제 요청 수신")
+    
+    # 1. 활성화된 세션이 있다면 메모리에서 즉시 해제 (DB 덮어쓰기 방지를 위해 teardown 생략)
+    if session_id in active_sessions:
+        del active_sessions[session_id]
+        # 삭제된 세션이 현재 화면에 띄워져 있던 세션이라면 활성 포인터 초기화
+        if current_active_session_id == session_id:
+            current_active_session_id = None
+
+    # 2. 사이드바 목록 DB에서 제거
+    global mock_sessions_db
+    mock_sessions_db = [s for s in mock_sessions_db if s["id"] != session_id]
+
+    # 3. 대화 내역 DB에서 제거
+    if session_id in mock_chat_history_db:
+        del mock_chat_history_db[session_id]
+
+    # 4. 세션 메타데이터 DB에서 제거
+    if session_id in mock_session_meta_db:
+        del mock_session_meta_db[session_id]
+
+    return {"success": True, "message": f"세션 {session_id} 삭제 완료"}
+
+
+# ==========================================
+# Static Files & 뷰 라우터
+# ==========================================
+
 RESOURCE_DIR = os.path.join(BASE_DIR, "resource")
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 
@@ -171,7 +296,78 @@ async def read_index():
 app.mount("/resource", StaticFiles(directory=RESOURCE_DIR), name="resource")
 app.mount("/", StaticFiles(directory=FRONTEND_DIR), name="frontend")
 
+
+# ==========================================
+# Mock DB Storage & Interface (데이터베이스 목업)
+# ==========================================
+
+mock_sessions_db = [
+    {"id": "session_1", "title": "오사카 3박 4일 일정"},
+    {"id": "session_2", "title": "제주도 여행 코스"}
+]
+
+mock_chat_history_db: Dict[str, List[Dict[str, str]]] = {
+    "session_1": [{"role": "user", "content": "오사카 일정 짜줘"}, {"role": "bot", "content": "네, 오사카 3박 4일 일정을 안내해 드릴게요."}],
+    "session_2": [{"role": "user", "content": "제주도 여행 코스 추천해줘"}, {"role": "bot", "content": "제주도 여행 코스를 추천해 드립니다."}]
+}
+
+# DB 메타데이터에 수동 변경 플래그(is_manual_title) 필드 추가
+mock_session_meta_db: Dict[str, Dict[str, any]] = {
+    "session_1": {"topic": "오사카 여행", "name": "오사카 3박 4일 일정", "context": "", "is_manual_title": False},
+    "session_2": {"topic": "제주도 여행", "name": "제주도 여행 코스", "context": "", "is_manual_title": False}
+}
+
+async def mock_db_get_session_list() -> List[dict]:
+    return mock_sessions_db
+
+async def mock_db_create_session(first_message: str) -> dict:
+    new_id = f"session_{uuid.uuid4().hex[:9]}"
+    title = first_message[:20] + "..." if len(first_message) > 20 else first_message
+    
+    new_session = {"id": new_id, "title": title}
+    mock_sessions_db.insert(0, new_session) 
+    
+    mock_chat_history_db[new_id] = []
+    mock_session_meta_db[new_id] = {"topic": "새로운 주제", "name": title, "context": "", "is_manual_title": False}
+    
+    return new_session
+
+async def mock_db_get_chat_history(session_id: str) -> List[dict]:
+    return mock_chat_history_db.get(session_id, [])
+
+class MockDBInterface:
+    async def load_personalization(self, user_id: str) -> str:
+        await asyncio.sleep(0.05)
+        return "사용자는 조용한 장소와 자연 경관을 선호합니다."
+
+    async def load_session_data(self, session_id: str) -> dict:
+        await asyncio.sleep(0.05)
+        return mock_session_meta_db.get(session_id, {})
+
+    async def append_messages(self, session_id: str, messages: List[dict]):
+        await asyncio.sleep(0.05)
+        if session_id not in mock_chat_history_db:
+            mock_chat_history_db[session_id] = []
+        mock_chat_history_db[session_id].extend(messages)
+
+    # 파라미터에 is_manual_title 추가
+    async def save_session_state(self, session_id: str, topic: str, name: str, context: str, is_manual_title: bool):
+        await asyncio.sleep(0.05)
+        if session_id in mock_session_meta_db:
+            mock_session_meta_db[session_id]["topic"] = topic
+            mock_session_meta_db[session_id]["name"] = name
+            mock_session_meta_db[session_id]["context"] = context
+            mock_session_meta_db[session_id]["is_manual_title"] = is_manual_title
+
+            for s in mock_sessions_db:
+                if s["id"] == session_id:
+                    s["title"] = name
+                    break
+
+    async def get_chat_history(self, session_id: str) -> List[dict]:
+        await asyncio.sleep(0.05)
+        return mock_chat_history_db.get(session_id, [])
+
 if __name__ == "__main__":
     import uvicorn
-    # 도커 내부에서 실행할 때는 0.0.0.0을 수신 대기해야 합니다.
     uvicorn.run(app, host="0.0.0.0", port=8090)

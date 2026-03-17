@@ -1,9 +1,18 @@
-// script.js
+// script.js (루트 폴더 위치)
+import { BackendHooks } from './js/api.js';
+import { 
+  updateSidebarSessionTitle, 
+  showToast, 
+  adjustTextareaHeight, 
+  showLoadingIndicator, 
+  removeLoadingIndicator, 
+  appendMessage 
+} from './js/ui.js';
+import { WeatherManager } from './js/weatherManager.js';
+
 document.addEventListener('DOMContentLoaded', () => {
 
-  // =========================================================
   // 1. DOM 요소 및 전역 상태
-  // =========================================================
   const mainContent = document.getElementById('mainContent');
   const heroSection = document.getElementById('heroSection');
   const pageSection = document.getElementById('pageSection');
@@ -31,157 +40,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const weatherLayer = document.getElementById('weatherLayer');
 
+  const topBarActions = document.getElementById('topBarActions');
+  const downloadChatBtn = document.getElementById('downloadChatBtn');
+  const shareChatBtn = document.getElementById('shareChatBtn');
+  
+  const attachBtn = document.getElementById('attachBtn');
+  const fileInput = document.getElementById('fileInput');
+
   let currentSessionId = null;
   let isReceiving = false;
-  let currentWeatherEffect = null; 
 
   const sidebarOverlay = document.getElementById('sidebarOverlay');
   const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
 
-  // =========================================================
-  // 2. 외부 API (Backend Hooks) - 실제 FastAPI 연동으로 전면 교체
-  // =========================================================
-  const BackendHooks = {
-    async fetchSessionList() {
-      const res = await fetch('/api/sessions');
-      return res.json();
-    },
 
-    async createSession(firstMessage) {
-      const res = await fetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ first_message: firstMessage })
-      });
-      return res.json();
-    },
-
-    async fetchChatHistory(sessionId) {
-      const res = await fetch(`/api/sessions/${sessionId}/history`);
-      return res.json();
-    },
-
-    async sendMessage(sessionId, message, onChunkReceived, onCompleted) {
-      try {
-        const response = await fetch(`/api/sessions/${sessionId}/message`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message })
-        });
-
-        if (!response.body) throw new Error("스트리밍 지원 안됨");
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder("utf-8");
-        let currentText = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          currentText += decoder.decode(value, { stream: true });
-          onChunkReceived(currentText);
-        }
-        onCompleted();
-      } catch (error) {
-        console.error("메시지 전송 오류:", error);
-        onCompleted();
-      }
-    },
-
-    async fetchSettings() {
-      const res = await fetch('/api/settings');
-      return res.json();
-    },
-
-    async fetchAccountInfo() {
-      const res = await fetch('/api/account');
-      return res.json();
-    },
-
-    async fetchHelpData() {
-      const res = await fetch('/api/help');
-      return res.json();
-    },
-
-    async saveThemePreference(themeName) {
-      const res = await fetch('/api/theme', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme: themeName })
-      });
-      return res.json();
-    },
-
-    async fetchCurrentWeather() {
-      try {
-        const res = await fetch('/api/weather');
-        return await res.json(); 
-      } catch (err) {
-        console.error("날씨 API 연동 실패:", err);
-        return { condition: 'clear', params: {} };
-      }
-    }
-  };
-
-  // =========================================================
-  // 3. Weather Manager (지연 로딩 및 컨트롤러)
-  // =========================================================
-  const WeatherManager = {
-    async syncWeather() {
-      if (currentWeatherEffect) {
-        currentWeatherEffect.unmount();
-        currentWeatherEffect = null;
-      }
-      weatherLayer.innerHTML = '';
-
-      const weatherData = await BackendHooks.fetchCurrentWeather();
-      // 백엔드 API가 { condition: 'rain', params: {...} } 형태를 준다고 가정
-      // 만약 백엔드가 { type: 'rain' }으로 준다면 condition 대신 type을 쓰도록 백엔드나 여기서 맞춰야 함
-      const condition = weatherData.condition || weatherData.type; 
-      const params = weatherData.params || {}; 
-      
-      console.log(`[WeatherManager] 적용할 날씨: ${condition}`, params);
-
-      try {
-        const EffectsModule = await import('./effects.js');
-        
-        // 프론트엔드 이펙트 모듈에는 백엔드 params만 그대로 주입합니다.
-        switch(condition) {
-          case 'rain': currentWeatherEffect = new EffectsModule.RainEffect(weatherLayer, params); break;
-          case 'night': currentWeatherEffect = new EffectsModule.NightEffect(weatherLayer, params); break;
-          case 'cloudy': currentWeatherEffect = new EffectsModule.CloudyEffect(weatherLayer, params); break;
-          case 'clear': 
-          default: currentWeatherEffect = new EffectsModule.ClearEffect(weatherLayer); break;
-        }
-
-        currentWeatherEffect.mount();
-      } catch (err) {
-        console.error("날씨 모듈 로드 실패:", err);
-      }
-    },
-
-    clear() {
-      if (currentWeatherEffect) {
-        currentWeatherEffect.unmount();
-        currentWeatherEffect = null;
-      }
-      weatherLayer.innerHTML = '';
-    }
-  };
-
-  // =========================================================
-  // 4. 라우팅 및 뷰 전환
-  // =========================================================
+  // 2. 라우팅 및 뷰 전환
   function switchView(viewName) {
     heroSection.style.display = 'none';
     chatHistory.style.display = 'none';
     chatWrap.style.display = 'none';
     pageSection.style.display = 'none';
+    topBarActions.style.display = 'none';
 
     if (viewName === 'home') {
       heroSection.style.display = 'flex'; chatWrap.style.display = 'block'; currentSessionId = null;
     } else if (viewName === 'chat') {
-      chatHistory.style.display = 'flex'; chatWrap.style.display = 'block';
+      chatHistory.style.display = 'flex'; chatWrap.style.display = 'block'; topBarActions.style.display = 'flex';
     } else if (viewName === 'page') {
       pageSection.style.display = 'flex'; currentSessionId = null;
     }
@@ -190,68 +74,142 @@ document.addEventListener('DOMContentLoaded', () => {
   async function router() {
     const path = window.location.hash;
     if (path === '' || path === '#/') {
-      switchView('home'); chatHistory.innerHTML = ''; chatInput.value = ''; adjustTextareaHeight(); chatBox.classList.remove('expanded');
+      switchView('home'); 
+      chatHistory.innerHTML = ''; 
+      chatInput.value = ''; 
+      adjustTextareaHeight(chatInput, chatBox); 
+      chatBox.classList.remove('expanded');
     } else if (path === '#/settings') {
-      switchView('page'); pageSection.innerHTML = `<h2>설정</h2><p>데이터를 불러오는 중...</p>`; const res = await BackendHooks.fetchSettings(); pageSection.innerHTML = `<h2>설정</h2><p>${res.data}</p>`;
+      switchView('page'); 
+      pageSection.innerHTML = `<h2>설정</h2><p>데이터를 불러오는 중...</p>`; 
+      const res = await BackendHooks.fetchSettings(); 
+      pageSection.innerHTML = `<h2>설정</h2><p>${res.data}</p>`;
     } else if (path === '#/account') {
-      switchView('page'); pageSection.innerHTML = `<h2>계정</h2><p>데이터를 불러오는 중...</p>`; const res = await BackendHooks.fetchAccountInfo(); pageSection.innerHTML = `<h2>계정</h2><p>${res.data}</p>`;
+      switchView('page'); 
+      pageSection.innerHTML = `<h2>계정</h2><p>데이터를 불러오는 중...</p>`; 
+      const res = await BackendHooks.fetchAccountInfo(); 
+      pageSection.innerHTML = `<h2>계정</h2><p>${res.data}</p>`;
     } else if (path === '#/help') {
-      switchView('page'); pageSection.innerHTML = `<h2>도움말</h2><p>데이터를 불러오는 중...</p>`; const res = await BackendHooks.fetchHelpData(); pageSection.innerHTML = `<h2>도움말</h2><p>${res.data}</p>`;
+      switchView('page'); 
+      pageSection.innerHTML = `<h2>도움말</h2><p>데이터를 불러오는 중...</p>`; 
+      const res = await BackendHooks.fetchHelpData(); 
+      pageSection.innerHTML = `<h2>도움말</h2><p>${res.data}</p>`;
     } else if (path.startsWith('#/chat/')) {
       const ssid = path.replace('#/chat/', '');
       if (currentSessionId !== ssid) {
-        switchView('chat'); chatHistory.innerHTML = '<div class="message-row bot"><div class="message bot">대화 기록을 불러오는 중...</div></div>'; currentSessionId = ssid;
+        switchView('chat'); 
+        chatHistory.innerHTML = '';
+        const loadingId = showLoadingIndicator(chatHistory);
+        currentSessionId = ssid;
+        
         const historyData = await BackendHooks.fetchChatHistory(ssid);
-        chatHistory.innerHTML = ''; historyData.forEach(msg => appendMessage(msg.content, msg.role));
-      } else { switchView('chat'); }
+        removeLoadingIndicator(loadingId);
+        historyData.forEach(msg => appendMessage(chatHistory, msg.content, msg.role));
+      } else { 
+        switchView('chat'); 
+      }
     }
   }
 
-  // =========================================================
-  // 5. UI 렌더링 및 유틸리티 함수
-  // =========================================================
-  function adjustTextareaHeight() {
-    if(chatBox.classList.contains('expanded')) return;
-    chatInput.style.height = '54px'; let scrollHeight = chatInput.scrollHeight;
-    if(scrollHeight > 54) { chatInput.style.height = Math.min(scrollHeight, 200) + 'px'; chatInput.style.overflowY = scrollHeight > 200 ? 'auto' : 'hidden'; } else { chatInput.style.overflowY = 'hidden'; }
-  }
-
-  function showLoadingIndicator() {
-    const loadingId = 'loading-' + Date.now(); const rowDiv = document.createElement('div'); rowDiv.className = `message-row bot`; rowDiv.id = loadingId;
-    const msgDiv = document.createElement('div'); msgDiv.classList.add('message', 'bot'); msgDiv.innerHTML = `<div class="loading-dots"><span></span><span></span><span></span></div>`;
-    rowDiv.appendChild(msgDiv); chatHistory.appendChild(rowDiv); chatHistory.scrollTop = chatHistory.scrollHeight; return loadingId;
-  }
-
-  function removeLoadingIndicator(id) { const loadingEl = document.getElementById(id); if(loadingEl) loadingEl.remove(); }
-
-  function appendMessage(text, sender, isStreaming = false) {
-    const rowDiv = document.createElement('div'); rowDiv.className = `message-row ${sender}`;
-    const msgDiv = document.createElement('div'); msgDiv.classList.add('message', sender); msgDiv.textContent = text; rowDiv.appendChild(msgDiv);
-    const actionsDiv = document.createElement('div'); actionsDiv.className = 'message-actions';
-    const copyBtn = document.createElement('button'); copyBtn.className = 'action-btn'; copyBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>`;
-    
-    copyBtn.addEventListener('click', async () => {
-      const currentText = msgDiv.textContent; 
-      try {
-        if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(currentText); } else {
-          const textArea = document.createElement("textarea"); textArea.value = currentText; textArea.style.position = "absolute"; textArea.style.left = "-999999px"; document.body.appendChild(textArea); textArea.select(); document.execCommand('copy'); document.body.removeChild(textArea);
-        }
-        const checkIcon = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#10B981" stroke-width="2"><path d="M5 13l4 4L19 7"></path></svg>`; const originalIcon = copyBtn.innerHTML; copyBtn.innerHTML = checkIcon; setTimeout(() => copyBtn.innerHTML = originalIcon, 2000);
-      } catch (err) { console.error("복사 실패:", err); }
-    });
-    actionsDiv.appendChild(copyBtn); rowDiv.appendChild(actionsDiv); chatHistory.appendChild(rowDiv); chatHistory.scrollTop = chatHistory.scrollHeight; return rowDiv; 
-  }
-
+  // 3. 사이드바 아이템 렌더링
   function renderSidebarItem(title, sessionId, isPrepend = true) {
-    const newBtn = document.createElement('button'); newBtn.classList.add('sidebar-item'); newBtn.setAttribute('data-session-id', sessionId);
+    const wrapper = document.createElement('div');
+    wrapper.className = 'sidebar-item-wrapper';
+
+    const newBtn = document.createElement('button'); 
+    newBtn.classList.add('sidebar-item'); 
+    newBtn.setAttribute('data-session-id', sessionId);
     newBtn.innerHTML = `<span class="dot"></span>${title}`;
+    
+    const editInput = document.createElement('input');
+    editInput.className = 'sidebar-item-edit-input';
+    editInput.type = 'text';
+    editInput.value = title;
+
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'session-actions';
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'session-action-btn';
+    editBtn.innerHTML = '✎';
+    editBtn.title = "이름 변경";
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'session-action-btn';
+    deleteBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
+    deleteBtn.title = "대화 삭제";
+
+    actionsDiv.appendChild(editBtn);
+    actionsDiv.appendChild(deleteBtn);
+
     newBtn.addEventListener('click', () => { if (isReceiving) return; window.location.hash = `#/chat/${sessionId}`; });
-    if (isPrepend) sidebarList.prepend(newBtn); else sidebarList.appendChild(newBtn);
+
+    editBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      newBtn.style.display = 'none';
+      actionsDiv.style.display = 'none';
+      editInput.style.display = 'block';
+      editInput.focus();
+    });
+
+    deleteBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if(confirm("이 대화를 정말로 삭제하시겠습니까?")) {
+        try {
+          const response = await BackendHooks.deleteSession(sessionId);
+          if (response.success) {
+            console.log(response.message);
+            wrapper.remove(); 
+            const currentTitle = editInput.value;
+            showToast(`세션 '${currentTitle}'이(가) 삭제되었습니다.`);
+            
+            if (currentSessionId === sessionId) {
+              window.location.hash = '#/';
+            }
+          } else {
+            alert("삭제에 실패했습니다.");
+          }
+        } catch (error) {
+          console.error("삭제 통신 오류:", error);
+          alert("서버와의 연결에 문제가 발생했습니다.");
+        }
+      }
+    });
+
+    const saveTitle = async () => {
+      const newTitle = editInput.value.trim();
+      if (newTitle && newTitle !== title) {
+        await BackendHooks.updateSessionTitle(sessionId, newTitle);
+        updateSidebarSessionTitle(sessionId, newTitle);
+        title = newTitle; 
+      } else {
+        editInput.value = title; 
+      }
+      editInput.style.display = 'none';
+      newBtn.style.display = 'flex';
+      actionsDiv.style.display = ''; 
+    };
+
+    editInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') saveTitle();
+      else if (e.key === 'Escape') {
+        editInput.value = title; 
+        editInput.style.display = 'none';
+        newBtn.style.display = 'flex';
+        actionsDiv.style.display = ''; 
+      }
+    });
+    editInput.addEventListener('blur', saveTitle);
+
+    wrapper.appendChild(newBtn);
+    wrapper.appendChild(editInput);
+    wrapper.appendChild(actionsDiv);
+
+    if (isPrepend) sidebarList.prepend(wrapper); 
+    else sidebarList.appendChild(wrapper);
   }
 
-  // =========================================================
-  // 6. 채팅 핵심 로직
-  // =========================================================
+  // 4. 채팅 핵심 로직
   async function handleSend() {
     const text = chatInput.value.trim(); if (!text || isReceiving) return;
     let isNewSession = false;
@@ -262,43 +220,85 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (isNewSession) { history.pushState(null, '', `#/chat/${currentSessionId}`); switchView('chat'); }
 
-    appendMessage(text, 'user'); chatInput.value = ''; adjustTextareaHeight();
-    isReceiving = true; sendBtn.disabled = true; const loadingId = showLoadingIndicator(); let botMsgDiv = null;
+    appendMessage(chatHistory, text, 'user'); 
+    chatInput.value = ''; 
+    adjustTextareaHeight(chatInput, chatBox);
+    isReceiving = true; 
+    sendBtn.disabled = true; 
+    const loadingId = showLoadingIndicator(chatHistory); 
+    let botMsgDiv = null;
 
     await BackendHooks.sendMessage(currentSessionId, text, (chunk) => {
-        if (!botMsgDiv) { removeLoadingIndicator(loadingId); botMsgDiv = appendMessage('', 'bot', true); }
-        botMsgDiv.querySelector('.message').textContent = chunk; chatHistory.scrollTop = chatHistory.scrollHeight;
-      }, () => { isReceiving = false; sendBtn.disabled = false; }
+        if (!botMsgDiv) { 
+          removeLoadingIndicator(loadingId); 
+          botMsgDiv = appendMessage(chatHistory, '', 'bot'); 
+        }
+        if (typeof marked !== 'undefined') {
+          botMsgDiv.querySelector('.message').innerHTML = marked.parse(chunk); 
+        } else {
+          botMsgDiv.querySelector('.message').textContent = chunk;
+        }
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+      }, async () => { 
+        isReceiving = false; 
+        sendBtn.disabled = false; 
+        
+        try {
+          const sessions = await BackendHooks.fetchSessionList();
+          const updatedSession = sessions.find(s => s.id === currentSessionId);
+          if (updatedSession) {
+            updateSidebarSessionTitle(currentSessionId, updatedSession.title);
+          }
+        } catch (e) {
+          console.error("세션 이름 동기화 실패:", e);
+        }
+      }
     );
   }
 
-  // =========================================================
-  // 7. 이벤트 바인딩 및 초기화
-  // =========================================================
+  // 5. 이벤트 바인딩 및 초기화
   async function init() {
     sidebarList.innerHTML = '';
     const sessions = await BackendHooks.fetchSessionList();
     sessions.forEach(session => renderSidebarItem(session.title, session.id, false));
   }
 
-  window.addEventListener('hashchange', router); window.addEventListener('load', router);
+  window.addEventListener('hashchange', router); 
+  window.addEventListener('load', router);
   menuToggle.addEventListener('click', toggleSidebar);
 
   function openSidebar() {
-    if (isMobile()) { sidebar.classList.add('open'); if (sidebarOverlay) { sidebarOverlay.style.display = 'block'; requestAnimationFrame(() => sidebarOverlay.classList.add('show')); }
+    if (isMobile()) { 
+      sidebar.classList.add('open'); 
+      if (sidebarOverlay) { 
+        sidebarOverlay.style.display = 'block'; 
+        requestAnimationFrame(() => sidebarOverlay.classList.add('show')); 
+      }
     } else { sidebar.classList.remove('collapsed'); }
   }
 
   function closeSidebar() {
-    if (isMobile()) { sidebar.classList.remove('open'); if (sidebarOverlay) { sidebarOverlay.classList.remove('show'); setTimeout(() => { sidebarOverlay.style.display = 'none'; }, 300); }
+    if (isMobile()) { 
+      sidebar.classList.remove('open'); 
+      if (sidebarOverlay) { 
+        sidebarOverlay.classList.remove('show'); 
+        setTimeout(() => { sidebarOverlay.style.display = 'none'; }, 300); 
+      }
     } else { sidebar.classList.add('collapsed'); }
   }
 
-  function toggleSidebar() { if (isMobile()) { sidebar.classList.contains('open') ? closeSidebar() : openSidebar(); } else { sidebar.classList.contains('collapsed') ? openSidebar() : closeSidebar(); } }
+  function toggleSidebar() { 
+    if (isMobile()) { sidebar.classList.contains('open') ? closeSidebar() : openSidebar(); } 
+    else { sidebar.classList.contains('collapsed') ? openSidebar() : closeSidebar(); } 
+  }
 
-  window.addEventListener('resize', () => { if (!isMobile()) { sidebar.classList.remove('open'); if (sidebarOverlay) { sidebarOverlay.classList.remove('show'); sidebarOverlay.style.display = 'none'; } } });
+  window.addEventListener('resize', () => { 
+    if (!isMobile()) { 
+      sidebar.classList.remove('open'); 
+      if (sidebarOverlay) { sidebarOverlay.classList.remove('show'); sidebarOverlay.style.display = 'none'; } 
+    } 
+  });
   if (sidebarOverlay) sidebarOverlay.addEventListener('click', closeSidebar);
-  sidebarList.addEventListener('click', (e) => { if (isMobile()) closeSidebar(); });
   
   homeBtn.addEventListener('click', () => { if (isMobile()) closeSidebar(); if(!isReceiving) window.location.hash = '#/'; });
   newChatBtn.addEventListener('click', () => { if (isMobile()) closeSidebar(); if(isReceiving) return; window.location.hash = '#/'; });
@@ -318,19 +318,77 @@ document.addEventListener('DOMContentLoaded', () => {
       themePopup.classList.remove('show');
       
       if (theme === 'weather') {
-        await WeatherManager.syncWeather();
+        await WeatherManager.syncWeather(weatherLayer);
       } else {
-        WeatherManager.clear();
+        WeatherManager.clear(weatherLayer);
       }
 
       await BackendHooks.saveThemePreference(theme);
     });
   });
 
-  chatInput.addEventListener('input', adjustTextareaHeight);
-  expandBtn.addEventListener('click', () => { chatBox.classList.toggle('expanded'); if(chatBox.classList.contains('expanded')) chatInput.style.height = 'auto'; else adjustTextareaHeight(); });
-  chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); handleSend(); } });
+  chatInput.addEventListener('input', () => adjustTextareaHeight(chatInput, chatBox));
+  
+  expandBtn.addEventListener('click', () => { 
+    chatBox.classList.toggle('expanded'); 
+    if(chatBox.classList.contains('expanded')) chatInput.style.height = 'auto'; 
+    else adjustTextareaHeight(chatInput, chatBox); 
+  });
+  
+  chatInput.addEventListener('keydown', (e) => { 
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { 
+      e.preventDefault(); handleSend(); 
+    } 
+  });
+  
   sendBtn.addEventListener('click', handleSend);
+
+  downloadChatBtn.addEventListener('click', () => {
+    if (!currentSessionId) return;
+    if(confirm("전체 대화 기록을 다운로드하시겠습니까?")) {
+      BackendHooks.downloadChat(currentSessionId);
+    }
+  });
+
+  shareChatBtn.addEventListener('click', () => {
+    alert("공유하기 기능이 호출되었습니다."); 
+  });
+
+  attachBtn.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+      handleFileUpload(e.target.files);
+    }
+  });
+
+  chatBox.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    chatBox.classList.add('drag-over');
+  });
+
+  chatBox.addEventListener('dragleave', () => {
+    chatBox.classList.remove('drag-over');
+  });
+
+  chatBox.addEventListener('drop', (e) => {
+    e.preventDefault();
+    chatBox.classList.remove('drag-over');
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFileUpload(e.dataTransfer.files);
+    }
+  });
+
+  function handleFileUpload(files) {
+    if (!currentSessionId) {
+      alert("먼저 대화를 시작해주세요.");
+      return;
+    }
+    const fileNames = Array.from(files).map(f => f.name).join(', ');
+    appendMessage(chatHistory, `[파일 첨부] ${fileNames}`, 'user'); 
+    BackendHooks.uploadFiles(currentSessionId, files); 
+    fileInput.value = ""; 
+  }
 
   init();
 });
