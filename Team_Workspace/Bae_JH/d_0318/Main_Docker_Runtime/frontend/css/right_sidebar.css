@@ -1,0 +1,58 @@
+/* ==========================================================
+   RIGHT SIDEBAR (오른쪽 사이드바 - 지도 영역)
+   ========================================================== */
+.right-sidebar { 
+  width: 320px; 
+  flex-shrink: 0; 
+  display: flex; 
+  flex-direction: column; 
+  padding: 22px 18px; 
+  border-left: 1px solid rgba(255,255,255,0.20); 
+  background: rgba(255,255,255,0.08); 
+  transition: width 0.3s ease, padding 0.3s ease, opacity 0.3s ease; 
+  overflow: hidden; 
+}
+
+.right-sidebar.collapsed { 
+  width: 0; 
+  padding: 0; 
+  opacity: 0; 
+  border-left: none; 
+}
+
+.right-sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.right-sidebar-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: rgba(17, 24, 39, 0.90);
+  letter-spacing: 0.1em;
+}
+
+.close-right-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: rgba(17, 24, 39, 0.6);
+  padding: 6px;
+  border-radius: 8px;
+  transition: 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-right-btn:hover {
+  background: rgba(255, 255, 255, 0.4);
+  color: rgba(17, 24, 39, 1);
+}
+
+.right-sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+}

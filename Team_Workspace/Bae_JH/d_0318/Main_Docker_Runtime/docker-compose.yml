@@ -1,0 +1,12 @@
+services:
+  glass-site:
+    build: .
+    container_name: glass-site-dev-test
+    ports:
+      - "8090:8090"
+    volumes:
+      - .:/app
+    env_file:
+      - setting/.env
+    restart: unless-stopped
+    
