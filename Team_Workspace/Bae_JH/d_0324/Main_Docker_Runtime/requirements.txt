@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+pydantic
+sqlalchemy
+langchain
+langchain-core
+langchain-openai
+langchain-google-genai
+openai
+python-dotenv
+python-multipart
+psycopg2-binary
+GeoAlchemy2
+shapely
+unstructured
+PyMuPDF
+aiohttp
