@@ -31,8 +31,6 @@ from pydantic import BaseModel
 from .test_agent import TestNode
 from .session_container import SessionContainer
 
-testNode = TestNode()
-
 app = FastAPI(title="Chatbot Middle-end API")
 
 app.add_middleware(
