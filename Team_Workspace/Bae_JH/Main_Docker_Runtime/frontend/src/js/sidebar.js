@@ -1,6 +1,6 @@
 /**
  * sidebar.js
- * manages left and right sidebar toggling, resizing, and synchronization.
+ * handles left and right sidebar toggling, resizing, and synchronization.
  */
 
 export const SidebarManager = {
@@ -27,269 +27,178 @@ export const SidebarManager = {
   },
 
   /**
-   * opens the left sidebar.
+   * Generic open sidebar logic
    */
-  openSidebar(elements, config) {
-    const { sidebar, sidebarOverlay, documentBody } = elements;
-    sidebar.classList.remove('collapsed'); 
+  _open(type, elements, config) {
+    const isLeft = type === 'left';
+    const sidebar = isLeft ? elements.sidebar : elements.rightSidebar;
+    const overlay = isLeft ? elements.sidebarOverlay : elements.rightSidebarOverlay;
+    const configKey = isLeft ? 'currentLeftWidth' : 'currentRightWidth';
+    const bodyClass = isLeft ? 'left-open' : 'right-open';
+
+    sidebar.classList.remove('collapsed');
     
-    if (this.isMobile()) { 
-      this.closeRightSidebar(elements, { silent: true });
-      sidebar.classList.add('open'); 
-      documentBody.classList.add('left-open');
-      if (sidebarOverlay) { 
-        sidebarOverlay.style.display = 'block'; 
-        requestAnimationFrame(() => sidebarOverlay.classList.add('show')); 
+    if (this.isMobile()) {
+      // Close opposite sidebar on mobile
+      if (isLeft) this.closeRightSidebar(elements, { silent: true });
+      else this.closeSidebar(elements, { silent: true });
+
+      sidebar.classList.add('open');
+      elements.documentBody.classList.add(bodyClass);
+      if (overlay) {
+        overlay.classList.remove('hidden');
+        requestAnimationFrame(() => overlay.classList.add('show'));
       }
       this.syncContentState(elements);
-    } else { 
-      sidebar.style.width = `${config.currentLeftWidth}px`;
+    } else {
+      sidebar.style.width = `${config[configKey]}px`;
+    }
+
+    if (!isLeft) {
+      // Relayout map if exists
+      setTimeout(() => {
+        if (window.kakaoMap && typeof window.kakaoMap.relayout === 'function') {
+          window.kakaoMap.relayout();
+        }
+      }, 310);
     }
   },
 
   /**
-   * closes the left sidebar.
+   * Generic close sidebar logic
    */
-  closeSidebar(elements, options = {}) {
-    const { sidebar, sidebarOverlay, documentBody } = elements;
+  _close(type, elements, options = {}) {
+    const isLeft = type === 'left';
+    const sidebar = isLeft ? elements.sidebar : elements.rightSidebar;
+    const overlay = isLeft ? elements.sidebarOverlay : elements.rightSidebarOverlay;
+    const bodyClass = isLeft ? 'left-open' : 'right-open';
     const { silent = false } = options;
-    
-    sidebar.classList.add('collapsed'); 
-    if (this.isMobile()) { 
-      sidebar.classList.remove('open'); 
-      documentBody.classList.remove('left-open');
-      if (sidebarOverlay) { 
-        sidebarOverlay.classList.remove('show'); 
-        setTimeout(() => { sidebarOverlay.style.display = 'none'; }, 300); 
+
+    sidebar.classList.add('collapsed');
+    if (this.isMobile()) {
+      sidebar.classList.remove('open');
+      elements.documentBody.classList.remove(bodyClass);
+      if (overlay) {
+        overlay.classList.remove('show');
+        setTimeout(() => { overlay.classList.add('hidden'); }, 300);
       }
       if (!silent) this.syncContentState(elements);
-    } else { 
-      sidebar.style.width = ''; 
+    } else {
+      sidebar.style.width = '';
     }
   },
 
-  /**
-   * opens the right sidebar.
-   */
-  openRightSidebar(elements, config) {
-    const { rightSidebar, rightSidebarOverlay, documentBody } = elements;
-    rightSidebar.classList.remove('collapsed');
-    
-    if (this.isMobile()) { 
-      this.closeSidebar(elements, { silent: true });
-      rightSidebar.classList.add('open'); 
-      documentBody.classList.add('right-open');
-      if (rightSidebarOverlay) { 
-        rightSidebarOverlay.style.display = 'block'; 
-        requestAnimationFrame(() => rightSidebarOverlay.classList.add('show')); 
-      }
-      this.syncContentState(elements);
-    } else { 
-      rightSidebar.style.width = `${config.currentRightWidth}px`; 
-    }
-
-    // Relayout map if exists
-    setTimeout(() => { 
-      if (window.kakaoMap && typeof window.kakaoMap.relayout === 'function') { 
-        window.kakaoMap.relayout(); 
-      } 
-    }, 310);
-  },
+  openSidebar(elements, config) { this._open('left', elements, config); },
+  closeSidebar(elements, options) { this._close('left', elements, options); },
+  openRightSidebar(elements, config) { this._open('right', elements, config); },
+  closeRightSidebar(elements, options) { this._close('right', elements, options); },
 
   /**
-   * closes the right sidebar.
-   */
-  closeRightSidebar(elements, options = {}) {
-    const { rightSidebar, rightSidebarOverlay, documentBody } = elements;
-    const { silent = false } = options;
-    
-    rightSidebar.classList.add('collapsed');
-    if (this.isMobile()) { 
-      rightSidebar.classList.remove('open'); 
-      documentBody.classList.remove('right-open');
-      if (rightSidebarOverlay) { 
-        rightSidebarOverlay.classList.remove('show'); 
-        setTimeout(() => { rightSidebarOverlay.style.display = 'none'; }, 300); 
-      }
-      if (!silent) this.syncContentState(elements);
-    } else { 
-      rightSidebar.style.width = ''; 
-    }
-  },
-
-  /**
-   * initializes sidebar tabs (Sessions vs Calendar).
+   * initializes sidebar tabs.
    */
   initTabs(elements) {
-    const { 
-      tabSessions, 
-      tabCalendar, 
-      sessionView, 
-      calendarView,
-      sessionHeaderControls,
-      calendarHeaderControls
-    } = elements;
-
+    const { tabSessions, tabCalendar, sessionView, calendarView, sessionHeaderControls, calendarHeaderControls } = elements;
     if (!tabSessions || !tabCalendar) return;
 
-    tabSessions.addEventListener('click', () => {
-      tabSessions.classList.add('active');
-      tabCalendar.classList.remove('active');
-      
+    const switchTab = (activeTab, inactiveTab, showView, hideView, showHeader, hideHeader) => {
+      activeTab.classList.add('active');
+      inactiveTab.classList.remove('active');
+      showView.style.display = 'flex';
+      hideView.style.display = 'none';
+      showHeader.style.display = 'block';
+      hideHeader.style.display = 'none';
+    };
+
+    tabSessions.addEventListener('click', () => switchTab(tabSessions, tabCalendar, sessionView, calendarView, sessionHeaderControls, calendarHeaderControls));
+    tabCalendar.addEventListener('click', () => switchTab(tabCalendar, tabSessions, calendarView, sessionView, calendarHeaderControls, sessionHeaderControls));
+
+    if (tabSessions.classList.contains('active')) {
       sessionView.style.display = 'flex';
       calendarView.style.display = 'none';
-      
       sessionHeaderControls.style.display = 'block';
       calendarHeaderControls.style.display = 'none';
-    });
-
-    tabCalendar.addEventListener('click', () => {
-      tabCalendar.classList.add('active');
-      tabSessions.classList.remove('active');
-      
-      sessionView.style.display = 'none';
+    } else {
       calendarView.style.display = 'flex';
-      
-      sessionHeaderControls.style.display = 'none';
+      sessionView.style.display = 'none';
       calendarHeaderControls.style.display = 'block';
-    });
+      sessionHeaderControls.style.display = 'none';
+    }
   },
 
   /**
-   * initializes folding for calendar and schedule sections.
+   * initializes folding.
    */
   initFolding(elements) {
-    const { toggleCalendarBtn, calendarContent, toggleScheduleBtn, scheduleContent } = elements;
-
-    if (toggleCalendarBtn && calendarContent) {
-      toggleCalendarBtn.addEventListener('click', () => {
-        const isCollapsed = calendarContent.classList.toggle('section-content-collapsed');
-        toggleCalendarBtn.classList.toggle('collapsed', isCollapsed);
-        toggleCalendarBtn.title = isCollapsed ? '펴기' : '접기';
+    const setupFolding = (btn, content) => {
+      if (!btn || !content) return;
+      btn.addEventListener('click', () => {
+        const isCollapsed = content.classList.toggle('section-content-collapsed');
+        btn.classList.toggle('collapsed', isCollapsed);
+        btn.title = isCollapsed ? '펴기' : '접기';
       });
-    }
-
-    if (toggleScheduleBtn && scheduleContent) {
-      toggleScheduleBtn.addEventListener('click', () => {
-        const isCollapsed = scheduleContent.classList.toggle('section-content-collapsed');
-        toggleScheduleBtn.classList.toggle('collapsed', isCollapsed);
-        toggleScheduleBtn.title = isCollapsed ? '펴기' : '접기';
-      });
-    }
+    };
+    setupFolding(elements.toggleCalendarBtn, elements.calendarContent);
+    setupFolding(elements.toggleScheduleBtn, elements.scheduleContent);
   },
 
   /**
-   * initializes sidebar resizers.
+   * Generic Resizer Logic
    */
   initResizers(elements, config) {
-    const { 
-      leftSidebarResizer, 
-      rightSidebarResizer, 
-      sidebar, 
-      rightSidebar, 
-      documentBody,
-      rightSidebarContent 
-    } = elements;
-
-    let isLeftSidebarDragging = false;
-    let lsStartX = 0;
-    let lsStartWidth = 0;
-
-    let isRightSidebarDragging = false;
-    let rsStartX = 0;
-    let rsStartWidth = 0;
-
-    if (leftSidebarResizer) {
-      leftSidebarResizer.addEventListener('mousedown', (e) => {
-        if (this.isMobile()) return; 
-        isLeftSidebarDragging = true; 
-        lsStartX = e.clientX; 
-        lsStartWidth = sidebar.getBoundingClientRect().width;
-        sidebar.classList.add('notransition'); 
-        leftSidebarResizer.classList.add('active');
-        documentBody.style.userSelect = 'none'; 
-        documentBody.style.cursor = 'col-resize';
-      });
-    }
-
-    if (rightSidebarResizer) {
-      rightSidebarResizer.addEventListener('mousedown', (e) => {
-        if (this.isMobile()) return; 
-        isRightSidebarDragging = true; 
-        rsStartX = e.clientX; 
-        rsStartWidth = rightSidebar.getBoundingClientRect().width;
-        rightSidebar.classList.add('notransition'); 
-        rightSidebarResizer.classList.add('active');
-        if (rightSidebarContent) rightSidebarContent.classList.add('map-drag-shield');
-        documentBody.style.userSelect = 'none'; 
-        documentBody.style.cursor = 'col-resize';
-      });
-    }
-
-    document.addEventListener('mousemove', (e) => {
-      const minMiddleWidth = Math.max(400, window.innerWidth * 0.3); // Ensure at least 400px or 30% for middle
-
-      if (isLeftSidebarDragging) {
-        const mouseDelta = e.clientX - lsStartX;
-        let newWidth = lsStartWidth + mouseDelta;
-
-        // Calculate available space for left sidebar
-        const currentRightWidth = rightSidebar.classList.contains('collapsed') ? 0 : rightSidebar.getBoundingClientRect().width;
-        const maxAllowed = window.innerWidth - currentRightWidth - minMiddleWidth;
-
-        if (newWidth < 300) newWidth = 300;
-        if (newWidth > maxAllowed) newWidth = maxAllowed;
-        
-        // Final safety check to not exceed 45% of total width
-        const absoluteMax = window.innerWidth * 0.45;
-        if (newWidth > absoluteMax) newWidth = absoluteMax;
-
-        sidebar.style.width = `${newWidth}px`; 
-        config.currentLeftWidth = newWidth;
-      }
+    const setupResizer = (resizer, target, side) => {
+      if (!resizer) return;
       
-      if (isRightSidebarDragging) {
-        const mouseDelta = rsStartX - e.clientX; 
-        let newWidth = rsStartWidth + mouseDelta;
+      let isDragging = false;
+      let startX = 0;
+      let startWidth = 0;
+      const configKey = side === 'left' ? 'currentLeftWidth' : 'currentRightWidth';
 
-        // Calculate available space for right sidebar
-        const currentLeftWidth = sidebar.classList.contains('collapsed') ? 0 : sidebar.getBoundingClientRect().width;
-        const maxAllowed = window.innerWidth - currentLeftWidth - minMiddleWidth;
+      resizer.addEventListener('mousedown', (e) => {
+        if (this.isMobile()) return;
+        isDragging = true;
+        startX = e.clientX;
+        startWidth = target.getBoundingClientRect().width;
+        target.classList.add('notransition');
+        resizer.classList.add('active');
+        elements.documentBody.style.userSelect = 'none';
+        elements.documentBody.style.cursor = 'col-resize';
+      });
 
-        if (newWidth < 300) newWidth = 300;
-        if (newWidth > maxAllowed) newWidth = maxAllowed;
+      document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const delta = side === 'left' ? (e.clientX - startX) : (startX - e.clientX);
+        let newWidth = startWidth + delta;
 
-        // Final safety check to not exceed 60% of total width (since it's a map)
-        const absoluteMax = window.innerWidth * 0.65;
-        if (newWidth > absoluteMax) newWidth = absoluteMax;
+        // Constraint logic
+        const minMiddleWidth = Math.max(400, window.innerWidth * 0.3);
+        const oppositeWidth = (side === 'left' ? elements.rightSidebar : elements.sidebar).getBoundingClientRect().width;
+        
+        // Use 1/3 only as a preference on wide screens, but always allow at least 300px
+        const maxAllowedByMiddle = window.innerWidth - oppositeWidth - minMiddleWidth;
+        const maxAllowedByThird = window.innerWidth / 3;
+        
+        // On very narrow screens, we must allow the sidebar to reach its minimum usable width (300px)
+        const maxAllowed = Math.max(300, Math.min(maxAllowedByMiddle, maxAllowedByThird));
 
-        rightSidebar.style.width = `${newWidth}px`; 
-        config.currentRightWidth = newWidth; 
-      }
-    });
+        newWidth = Math.max(300, Math.min(newWidth, maxAllowed));
+        
+        target.style.width = `${newWidth}px`;
+        config[configKey] = newWidth;
+      });
 
+      document.addEventListener('mouseup', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        target.classList.remove('notransition');
+        resizer.classList.remove('active');
+        elements.documentBody.style.userSelect = '';
+        elements.documentBody.style.cursor = '';
+        localStorage.setItem(side === 'left' ? 'leftSidebarCustomWidth' : 'rightSidebarCustomWidth', config[configKey]);
+        if (side === 'right' && window.kakaoMap) window.kakaoMap.relayout();
+      });
+    };
 
-    document.addEventListener('mouseup', () => {
-      if (isLeftSidebarDragging) {
-        isLeftSidebarDragging = false; 
-        sidebar.classList.remove('notransition'); 
-        leftSidebarResizer.classList.remove('active');
-        documentBody.style.userSelect = ''; 
-        documentBody.style.cursor = ''; 
-        localStorage.setItem('leftSidebarCustomWidth', config.currentLeftWidth);
-      }
-      if (isRightSidebarDragging) {
-        isRightSidebarDragging = false; 
-        rightSidebar.classList.remove('notransition'); 
-        rightSidebarResizer.classList.remove('active');
-        if (rightSidebarContent) rightSidebarContent.classList.remove('map-drag-shield');
-        documentBody.style.userSelect = ''; 
-        documentBody.style.cursor = ''; 
-        localStorage.setItem('rightSidebarCustomWidth', config.currentRightWidth);
-        if (window.kakaoMap && typeof window.kakaoMap.relayout === 'function') { 
-          window.kakaoMap.relayout(); 
-        }
-      }
-    });
+    setupResizer(elements.leftSidebarResizer, elements.sidebar, 'left');
+    setupResizer(elements.rightSidebarResizer, elements.rightSidebar, 'right');
   }
 };

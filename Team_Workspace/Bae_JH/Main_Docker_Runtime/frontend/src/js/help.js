@@ -2,25 +2,8 @@
  * help.js
  */
 
+import { renderTemplate } from './utils.js';
+
 export function renderHelpPage(container) {
-  container.innerHTML = `
-    <div class="page-view-content">
-      <h2 class="page-title">도움말</h2>
-      
-      <div class="help-item">
-        <h3 class="help-question">어떻게 시작하나요?</h3>
-        <p class="help-answer">'새 대화 시작' 버튼을 눌러 여행 플래너와 대화를 시작할 수 있습니다.</p>
-      </div>
-
-      <div class="help-item">
-        <h3 class="help-question">지도는 어떻게 보나요?</h3>
-        <p class="help-answer">상단 바의 지도 아이콘을 누르면 우측에 지도가 나타납니다.</p>
-      </div>
-
-      <div class="help-item">
-        <h3 class="help-question">테마를 변경하고 싶어요.</h3>
-        <p class="help-answer">좌측 하단의 물방울 모양 아이콘을 눌러 다양한 배경 테마를 선택할 수 있습니다.</p>
-      </div>
-    </div>
-  `;
+  container.innerHTML = renderTemplate('help');
 }

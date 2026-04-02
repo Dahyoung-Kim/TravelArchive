@@ -1,51 +1,23 @@
 /**
  * session.js
- * manages session list rendering and state in the sidebar.
  */
 
 import { BackendHooks } from './api.js';
+import { Icons } from './assets.js';
+import { renderTemplate, createElementFromHTML } from './utils.js';
 import { updateSidebarSessionTitle, showToast } from './ui.js';
 
 export const SessionManager = {
-  /**
-   * renders a session item in the sidebar list.
-   */
   renderSidebarItem(title, sessionId, elements, state, isPrepend = true) {
-    const { sidebarList } = elements;
+    const html = renderTemplate('session_item', { title, sessionId }, Icons);
+    const wrapper = createElementFromHTML(html);
+
+    const newBtn = wrapper.querySelector('.sidebar-item');
+    const editInput = wrapper.querySelector('.sidebar-item-edit-input');
+    const actionsDiv = wrapper.querySelector('.session-actions');
+    const editBtn = wrapper.querySelector('.edit-btn');
+    const deleteBtn = wrapper.querySelector('.delete-btn');
     
-    const wrapper = document.createElement('div');
-    wrapper.className = 'sidebar-item-wrapper';
-    
-    const newBtn = document.createElement('button');
-    newBtn.classList.add('sidebar-item');
-    newBtn.setAttribute('data-session-id', sessionId);
-    newBtn.innerHTML = `<span class="dot"></span>${title}`;
-    
-    const editInput = document.createElement('input');
-    editInput.className = 'sidebar-item-edit-input';
-    editInput.type = 'text';
-    editInput.value = title;
-    
-    const actionsDiv = document.createElement('div');
-    actionsDiv.className = 'session-actions';
-    
-    const editBtn = document.createElement('button');
-    editBtn.className = 'session-action-btn';
-    editBtn.innerHTML = '✎';
-    editBtn.title = "이름 변경";
-    
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'session-action-btn';
-    deleteBtn.innerHTML = `
-      <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="3 6 5 6 21 6"></polyline>
-        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-      </svg>`;
-    
-    actionsDiv.appendChild(editBtn);
-    actionsDiv.appendChild(deleteBtn);
-    
-    // Event Handlers
     newBtn.addEventListener('click', () => {
       if (state.isReceiving) return;
       window.location.hash = `#/chat/${sessionId}`;
@@ -67,13 +39,9 @@ export const SessionManager = {
           if (response.success) {
             wrapper.remove();
             showToast(`삭제됨`);
-            if (state.currentSessionId === sessionId) {
-              window.location.hash = '#/';
-            }
+            if (state.currentSessionId === sessionId) window.location.hash = '#/';
           }
-        } catch (error) {
-          console.error("Failed to delete session:", error);
-        }
+        } catch (error) { console.error(error); }
       }
     });
 
@@ -84,15 +52,11 @@ export const SessionManager = {
           await BackendHooks.updateSessionTitle(sessionId, newTitle);
           updateSidebarSessionTitle(sessionId, newTitle);
           title = newTitle;
-        } catch (error) {
-          console.error("Failed to update title:", error);
-        }
-      } else {
-        editInput.value = title;
+        } catch (error) { console.error(error); }
       }
       editInput.style.display = 'none';
       newBtn.style.display = 'flex';
-      actionsDiv.style.display = ''; 
+      actionsDiv.style.display = '';
     };
 
     editInput.addEventListener('keydown', (e) => {
@@ -107,26 +71,17 @@ export const SessionManager = {
     
     editInput.addEventListener('blur', saveTitle);
 
-    wrapper.appendChild(newBtn);
-    wrapper.appendChild(editInput);
-    wrapper.appendChild(actionsDiv);
-    
-    if (isPrepend) sidebarList.prepend(wrapper);
-    else sidebarList.appendChild(wrapper);
+    if (isPrepend) elements.sidebarList.prepend(wrapper);
+    else elements.sidebarList.appendChild(wrapper);
   },
 
-  /**
-   * initializes the session list.
-   */
   async init(elements, state) {
     elements.sidebarList.innerHTML = '';
     try {
       const sessions = await BackendHooks.fetchSessionList();
-      sessions.forEach(session => {
+      for (const session of sessions) {
         this.renderSidebarItem(session.title, session.id, elements, state, false);
-      });
-    } catch (error) {
-      console.error("Failed to fetch session list:", error);
-    }
+      }
+    } catch (error) { console.error(error); }
   }
 };

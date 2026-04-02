@@ -27,8 +27,8 @@
         <div class="sidebar-resizer left-sidebar-resizer" id="leftSidebarResizer" title="크기 조절"></div>
         
         <div class="sidebar-header">
-          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-            <div class="sidebar-label" id="homeBtn" style="cursor: pointer;" title="메인으로 돌아가기">ARCHIVE</div>
+          <div class="flex-between w-full">
+            <div class="sidebar-label cursor-pointer" id="homeBtn" title="메인으로 돌아가기">ARCHIVE</div>
             <button id="resetLeftSidebarBtn" class="close-right-btn" title="사이드바 크기 초기화">
               <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="1 4 1 10 7 10"></polyline>
@@ -75,7 +75,7 @@
               <button class="section-toggle-btn" id="toggleCalendarBtn" title="접기/펴기">
                 <svg class="toggle-icon" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
                   <line class="line-h" x1="5" y1="12" x2="19" y2="12"></line>
-                  <line class="line-v" x1="12" y1="5" x2="12" y2="19" style="display:none;"></line>
+                  <line class="line-v hidden" x1="12" y1="5" x2="12" y2="19"></line>
                 </svg>
               </button>
             </div>
@@ -83,12 +83,12 @@
               <!-- Rendered via js/calendar.js -->
             </div>
             
-            <div class="section-header" style="margin-top: 10px;">
+            <div class="section-header mt-10">
               <div class="section-subtitle">상세 일정</div>
               <button class="section-toggle-btn" id="toggleScheduleBtn" title="접기/펴기">
                 <svg class="toggle-icon" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
                   <line class="line-h" x1="5" y1="12" x2="19" y2="12"></line>
-                  <line class="line-v" x1="12" y1="5" x2="12" y2="19" style="display:none;"></line>
+                  <line class="line-v hidden" x1="12" y1="5" x2="12" y2="19"></line>
                 </svg>
               </button>
             </div>
@@ -98,7 +98,7 @@
           </div>
         </div>
 
-        <div class="sidebar-footer" style="position: relative;">
+        <div class="sidebar-footer">
           <div class="theme-popup" id="themePopup">
             <button class="theme-swatch" data-theme="default" style="background: #bcd3e6;" title="기본(스카이블루)"></button>
             <button class="theme-swatch" data-theme="dark" style="background: #1f2937;" title="다크 모드"></button>
@@ -173,7 +173,7 @@
         <div class="sidebar-resizer right-sidebar-resizer" id="rightSidebarResizer" title="크기 조절"></div>
         <div class="right-sidebar-header">
           <div class="right-sidebar-title">MAP</div>
-          <div class="right-sidebar-actions" style="display: flex; gap: 8px; align-items: center;">
+          <div class="right-sidebar-actions flex gap-8">
             <button id="resetRightSidebarBtn" class="close-right-btn" title="지도 크기 520px로 초기화">
               <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="1 4 1 10 7 10"></polyline>
@@ -204,4 +204,4 @@
     </div>
   </div>
 </body>
-</html>
+</html>l>

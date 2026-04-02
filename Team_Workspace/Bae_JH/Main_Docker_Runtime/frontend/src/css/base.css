@@ -1,3 +1,27 @@
+:root {
+  /* Colors */
+  --primary-color: #3b82f6;
+  --primary-dark: #1d4ed8;
+  --bg-dark: #111827;
+  --text-main: #111827;
+  --text-muted: rgba(31, 41, 55, 0.6);
+  --glass-bg: rgba(255, 255, 255, var(--app-glass-opacity, 0.14));
+  --glass-border: rgba(255, 255, 255, 0.34);
+  
+  /* Layout */
+  --sidebar-default-width: 300px;
+  --sidebar-min-width: 260px;
+  --sidebar-max-width: 45%;
+  --right-sidebar-max-width: 65%;
+  --app-padding: 18px;
+  --card-radius: 24px;
+  --panel-radius: 32px;
+  
+  /* Animation */
+  --transition-speed: 0.3s;
+  --transition-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 * { 
   box-sizing: border-box; 
 }
@@ -69,6 +93,43 @@ body[data-theme="dark"] .chat-box textarea::-webkit-scrollbar-thumb:active,
 body[data-theme="dark"] .page-section::-webkit-scrollbar-thumb:active {
   background-color: rgba(255, 255, 255, 0.5);
 }
+
+/* ==========================================================
+   UTILITIES
+   ========================================================== */
+.hidden {
+  display: none !important;
+}
+
+.flex {
+  display: flex !important;
+}
+
+.flex-between {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+}
+
+.flex-center {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+}
+
+.gap-8 { gap: 8px !important; }
+.gap-12 { gap: 12px !important; }
+
+.cursor-pointer { cursor: pointer !important; }
+
+.text-center { text-align: center !important; }
+.w-full { width: 100% !important; }
+
+.p-16-24 { padding: 16px 24px !important; }
+.m-0 { margin: 0 !important; }
+.mt-10 { margin-top: 10px !important; }
+.fs-13 { font-size: 13px !important; }
+
 /* ==========================================================
    KEYFRAMES (공통 애니메이션)
    ========================================================== */

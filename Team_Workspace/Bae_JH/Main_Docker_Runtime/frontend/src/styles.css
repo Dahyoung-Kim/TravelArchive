@@ -1,4 +1,7 @@
 @import url('./css/base.css');
+@import url('./css/assets/buttons.css');
+@import url('./css/assets/forms.css');
+@import url('./css/assets/cards.css');
 @import url('./css/layout.css');
 @import url('./css/left_sidebar.css');
 @import url('./css/right_sidebar.css');
