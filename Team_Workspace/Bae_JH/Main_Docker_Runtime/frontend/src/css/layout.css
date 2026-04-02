@@ -98,13 +98,13 @@
   z-index: 10;
   height: 100vh;
   height: 100dvh;
-  padding: 12px;
+  padding: 18px; /* 상하좌우 모든 여백을 18px로 완전 통일 */
 }
 
 .main-panel {
   width: 100%;
-  height: calc(100vh - 24px);
-  height: calc(100dvh - 24px);
+  height: calc(100vh - 36px); /* 상하 18px * 2 보정 */
+  height: calc(100dvh - 36px);
   display: flex;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.34);

@@ -22,13 +22,13 @@
 
 @media (max-width: 1024px) {
   .app-shell {
-    padding: 10px;
+    padding: 15px;
   }
 
   .main-panel {
     border-radius: 24px;
-    height: calc(100vh - 20px);
-    height: calc(100dvh - 20px);
+    height: calc(100vh - 30px);
+    height: calc(100dvh - 30px);
   }
 
   .sidebar {
@@ -87,13 +87,13 @@
 
 @media (max-width: 768px) {
   .app-shell {
-    padding: 10px;
+    padding: 12px;
   }
 
   .main-panel {
     border-radius: 20px;
-    height: calc(100vh - 20px);
-    height: calc(100dvh - 20px);
+    height: calc(100vh - 24px);
+    height: calc(100dvh - 24px);
     position: relative;
     overflow: hidden;
   }
@@ -404,13 +404,13 @@
 
 @media (max-width: 480px) {
   .app-shell {
-    padding: 6px;
+    padding: 8px;
   }
 
   .main-panel {
     border-radius: 16px;
-    height: calc(100vh - 12px);
-    height: calc(100dvh - 12px);
+    height: calc(100vh - 16px);
+    height: calc(100dvh - 16px);
   }
 
   .hero h1 {
@@ -473,7 +473,7 @@
 
 @media (max-width: 896px) and (orientation: landscape) {
   .app-shell {
-    padding: 8px;
+    padding: 12px 8px 4px;
   }
 
   .main-panel {
