@@ -1,6 +1,6 @@
 /**
  * calendar.js
- * Manages the interactive calendar component.
+ * Manages the interactive calendar component with original styling.
  */
 
 import { renderTemplate } from './utils.js';
@@ -21,13 +21,11 @@ export const CalendarManager = {
     const daysContainer = document.getElementById('calendarDays');
     const prevBtn = document.getElementById('prevMonthBtn');
     const nextBtn = document.getElementById('nextMonthBtn');
-    const todayBtn = document.getElementById('todayBtn');
 
     const year = currentCalendarDate.getFullYear();
     const month = currentCalendarDate.getMonth();
 
-    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-    titleEl.textContent = `${monthNames[month]} ${year}`;
+    titleEl.textContent = `${year}년 ${month + 1}월`;
 
     daysContainer.innerHTML = '';
 
@@ -38,7 +36,7 @@ export const CalendarManager = {
     // Fill previous month's days
     for (let i = firstDayOfMonth; i > 0; i--) {
       const span = document.createElement('span');
-      span.className = 'day-prev';
+      span.style.opacity = '0.3';
       span.textContent = lastDateOfPrevMonth - i + 1;
       daysContainer.appendChild(span);
     }
@@ -48,36 +46,33 @@ export const CalendarManager = {
       const span = document.createElement('span');
       span.textContent = i;
       
-      // Mark specific date: April 4, 2026
+      // Mark specific date: April 4, 2026 (Mock Today)
       if (year === 2026 && month === 3 && i === 4) {
-        span.className = 'day-today';
+        span.className = 'active';
       }
       daysContainer.appendChild(span);
     }
 
-    // Fill next month's days to maintain a 6-row grid
-    const totalSlots = 42; 
-    const currentSlots = daysContainer.children.length;
-    for (let i = 1; i <= (totalSlots - currentSlots); i++) {
+    // Fill next month's days to maintain grid
+    const remainingSlots = 35 - daysContainer.children.length; 
+    const finalSlots = remainingSlots < 0 ? 42 - daysContainer.children.length : remainingSlots;
+    
+    for (let i = 1; i <= finalSlots; i++) {
       const span = document.createElement('span');
-      span.className = 'day-next';
+      span.style.opacity = '0.3';
       span.textContent = i;
       daysContainer.appendChild(span);
     }
 
-    // Event Handlers
-    prevBtn.onclick = () => {
+    prevBtn.onclick = (e) => {
+      e.stopPropagation();
       currentCalendarDate.setMonth(currentCalendarDate.getMonth() - 1);
       this.updateUI();
     };
 
-    nextBtn.onclick = () => {
+    nextBtn.onclick = (e) => {
+      e.stopPropagation();
       currentCalendarDate.setMonth(currentCalendarDate.getMonth() + 1);
-      this.updateUI();
-    };
-
-    todayBtn.onclick = () => {
-      currentCalendarDate = new Date(2026, 3, 4);
       this.updateUI();
     };
   }

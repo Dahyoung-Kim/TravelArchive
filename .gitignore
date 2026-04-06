@@ -18,12 +18,14 @@ default.conf
 nginx.conf
 certified.conf
 
-# 1. certbot 폴더 안은 아예 쳐다보지도 마 (안을 뒤지지 않음)
-Team_Workspace/Bae_JH/Main_Docker_Runtime/certbot/conf/*
-Team_Workspace/Bae_JH/Main_Docker_Runtime/certbot/www/*
+certbot/**
+**/certbot/**
 
-# 2. (선택사항) 만약 위 설정으로도 에러가 나면 아래처럼 아예 통째로 막아
-# Team_Workspace/Bae_JH/Main_Docker_Runtime/certbot/
+!certbot/
+!certbot/.gitkeep
+
+!**/certbot/
+!**/certbot/.gitkeep
 
 # ==============================================================================
 # 2. 가상 환경 및 환경 변수 (Virtual Environments & ENV Variables)
@@ -49,6 +51,7 @@ pip-delete-this-directory.txt
 db.sqlite3
 db.sqlite3-journal
 *.rdb
+
 # ==============================================================================
 # 4. 파이썬 핵심 및 컴파일 파일 (Python Core & Compiled Files)
 # ==============================================================================

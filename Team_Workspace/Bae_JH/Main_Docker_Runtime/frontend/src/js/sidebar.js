@@ -2,6 +2,15 @@
  * sidebar.js
  * handles left and right sidebar toggling, resizing, and synchronization.
  */
+import { BackendHooks } from './api.js';
+
+const debounce = (func, delay) => {
+  let timeout;
+  return (...args) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), delay);
+  };
+};
 
 export const SidebarManager = {
   isMobile: () => window.matchMedia('(max-width: 768px)').matches,
@@ -39,7 +48,6 @@ export const SidebarManager = {
     sidebar.classList.remove('collapsed');
     
     if (this.isMobile()) {
-      // Close opposite sidebar on mobile
       if (isLeft) this.closeRightSidebar(elements, { silent: true });
       else this.closeSidebar(elements, { silent: true });
 
@@ -55,7 +63,6 @@ export const SidebarManager = {
     }
 
     if (!isLeft) {
-      // Relayout map if exists
       setTimeout(() => {
         if (window.kakaoMap && typeof window.kakaoMap.relayout === 'function') {
           window.kakaoMap.relayout();
@@ -93,9 +100,6 @@ export const SidebarManager = {
   openRightSidebar(elements, config) { this._open('right', elements, config); },
   closeRightSidebar(elements, options) { this._close('right', elements, options); },
 
-  /**
-   * initializes sidebar tabs.
-   */
   initTabs(elements) {
     const { tabSessions, tabCalendar, sessionView, calendarView, sessionHeaderControls, calendarHeaderControls } = elements;
     if (!tabSessions || !tabCalendar) return;
@@ -109,7 +113,6 @@ export const SidebarManager = {
       hideHeader.style.display = 'none';
       
       if (activeTab === tabCalendar) {
-        // Recalculate all memo heights when showing calendar tab
         setTimeout(() => this.adjustAllMemoHeights(), 0);
       }
     };
@@ -139,16 +142,10 @@ export const SidebarManager = {
     });
   },
 
-  /**
-   * initializes folding and row management.
-   */
   initFolding(elements) {
     const isSmallHeight = window.innerHeight < 850;
-
     const setupFolding = (btn, content, forceCollapse = false) => {
       if (!btn || !content) return;
-      
-      // 해당 섹션 내의 +/- 버튼들 찾기
       const header = btn.parentElement;
       const rowButtons = header ? header.querySelectorAll('.row-action-btn') : [];
 
@@ -157,11 +154,7 @@ export const SidebarManager = {
         btn.classList.toggle('collapsed', collapse);
         btn.title = collapse ? '펴기' : '접기';
         content.style.display = collapse ? 'none' : 'block';
-        
-        // +/- 버튼들의 활성/비활성 상태 시각적 동기화
-        rowButtons.forEach(rowBtn => {
-          rowBtn.classList.toggle('disabled', collapse);
-        });
+        rowButtons.forEach(rowBtn => rowBtn.classList.toggle('disabled', collapse));
       };
 
       btn.addEventListener('click', () => {
@@ -169,19 +162,14 @@ export const SidebarManager = {
         toggle(!currentlyCollapsed);
       });
 
-      // 초기 상태 설정
-      if (forceCollapse) {
-        toggle(true);
-      }
+      if (forceCollapse) toggle(true);
     };
 
     setupFolding(elements.toggleCalendarBtn, elements.calendarContent, isSmallHeight);
     setupFolding(elements.toggleScheduleBtn, elements.scheduleContent, isSmallHeight);
     setupFolding(elements.toggleMemoBtn, elements.memoContent, isSmallHeight);
 
-    // Row management for Memo
     this.initMemoRows(elements);
-    // Row management for Schedule (assuming it's a table or list)
     this.initScheduleRows(elements);
   },
 
@@ -190,100 +178,96 @@ export const SidebarManager = {
     if (!tableBody) return;
 
     const adjustHeight = (textarea) => {
-      textarea.style.height = '1px'; // 강제 리셋 후 높이 계산
+      textarea.style.height = '1px';
       textarea.style.height = (textarea.scrollHeight) + 'px';
     };
 
-    const createRow = (index) => {
+    const handleMemoSave = debounce(async (content) => {
+        const sessionId = window.location.hash.split('session_')[1] || 'current';
+        console.log(`[Sync] Saving memo for session ${sessionId}...`);
+        await BackendHooks.saveMemo(sessionId, content);
+    }, 1000);
+
+    const createRow = (index, content = '') => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td style="width: 32px; padding-top: 10px; text-align: center; color: rgba(31, 41, 55, 0.4); font-size: 11px; font-weight: 700; border-right: 1px solid rgba(255,255,255,0.05);">${index}</td>
         <td>
-          <textarea class="memo-input-flat" placeholder="메모를 입력하세요..." rows="1"></textarea>
+          <textarea class="memo-input-flat" placeholder="메모를 입력하세요..." rows="1">${content}</textarea>
         </td>
       `;
       const textarea = tr.querySelector('textarea');
-      // 글을 쓸 때 높이 조절
-      textarea.addEventListener('input', () => adjustHeight(textarea));
-      // 시프트+엔터 등 줄바꿈 시 즉시 조절
-      textarea.addEventListener('keydown', () => setTimeout(() => adjustHeight(textarea), 0));
-      
-      // 초기 높이 설정 - CSS의 34px에 맞춤
-      setTimeout(() => {
-        textarea.style.height = '34px';
-        adjustHeight(textarea);
-      }, 0);
+      textarea.addEventListener('input', () => {
+          adjustHeight(textarea);
+          const allMemos = Array.from(tableBody.querySelectorAll('textarea')).map(t => t.value).join('\n');
+          handleMemoSave(allMemos);
+      });
+      setTimeout(() => adjustHeight(textarea), 0);
       return tr;
     };
 
-    // 초기 5줄 생성
-    tableBody.innerHTML = '';
-    for (let i = 1; i <= 5; i++) {
-      tableBody.appendChild(createRow(i));
-    }
-
-    // 줄 추가/삭제 버튼 직접 연결 (elements가 늦게 로드될 경우 대비)
     const addBtn = document.getElementById('addMemoRowBtn');
     const removeBtn = document.getElementById('removeMemoRowBtn');
 
     addBtn?.addEventListener('click', () => {
-      // 접힌 상태라면 무시
-      if (elements.memoContent?.classList.contains('section-content-collapsed')) return;
-      
       const nextIndex = tableBody.querySelectorAll('tr').length + 1;
       tableBody.appendChild(createRow(nextIndex));
     });
 
     removeBtn?.addEventListener('click', () => {
-      // 접힌 상태라면 무시
-      if (elements.memoContent?.classList.contains('section-content-collapsed')) return;
-      
       const rows = tableBody.querySelectorAll('tr');
-      if (rows.length > 5) {
-        tableBody.removeChild(rows[rows.length - 1]);
-      }
+      if (rows.length > 5) tableBody.removeChild(rows[rows.length - 1]);
     });
+
+    tableBody.innerHTML = '';
+    for (let i = 1; i <= 5; i++) tableBody.appendChild(createRow(i));
   },
 
   initScheduleRows(elements) {
+    const tableBody = document.getElementById('scheduleTableBody');
+    if (!tableBody) return;
+
+    const handleScheduleSave = debounce(async (plan) => {
+        const sessionId = window.location.hash.split('session_')[1] || 'current';
+        console.log(`[Sync] Saving schedule for session ${sessionId}...`);
+        await BackendHooks.updateSchedule(sessionId, plan);
+    }, 1000);
+
+    const createRow = (time = '09:00', activity = '') => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text" value="${time}" style="width:100%; background:transparent; border:none; color:inherit; font:inherit; outline:none;"></td>
+        <td><input type="text" value="${activity}" placeholder="활동 입력" style="width:100%; background:transparent; border:none; color:inherit; font:inherit; outline:none;"></td>
+      `;
+      tr.querySelectorAll('input').forEach(input => {
+          input.addEventListener('input', () => {
+              const plan = Array.from(tableBody.querySelectorAll('tr')).map(row => {
+                  const inputs = row.querySelectorAll('input');
+                  return { time: inputs[0].value, activity: inputs[1].value };
+              });
+              handleScheduleSave(plan);
+          });
+      });
+      return tr;
+    };
+
     const addBtn = document.getElementById('addScheduleRowBtn');
     const removeBtn = document.getElementById('removeScheduleRowBtn');
-    const container = elements.scheduleContent;
 
-    addBtn?.addEventListener('click', () => {
-      // 접힌 상태라면 무시
-      if (container?.classList.contains('section-content-collapsed')) return;
-      
-      const list = container.querySelector('tbody') || container;
-      if (list && list.children.length > 0) {
-        const lastRow = list.lastElementChild;
-        const newRow = lastRow.cloneNode(true);
-        newRow.querySelectorAll('input, td:not(:first-child)').forEach(el => {
-          if (el.tagName === 'INPUT') el.value = '';
-          else if (el.childNodes.length === 1 && el.firstChild.nodeType === 3) el.textContent = '';
-        });
-        list.appendChild(newRow);
-      }
-    });
-
+    addBtn?.addEventListener('click', () => tableBody.appendChild(createRow()));
     removeBtn?.addEventListener('click', () => {
-      // 접힌 상태라면 무시
-      if (container?.classList.contains('section-content-collapsed')) return;
-      
-      const list = container.querySelector('tbody') || container;
-      if (list && list.children.length > 1) {
-        list.removeChild(list.lastElementChild);
-      }
+      const rows = tableBody.querySelectorAll('tr');
+      if (rows.length > 1) tableBody.removeChild(rows[rows.length - 1]);
     });
+
+    tableBody.innerHTML = '';
+    tableBody.appendChild(createRow('09:00', '기상 및 조식'));
+    tableBody.appendChild(createRow('11:00', '이동'));
   },
 
-  /**
-   * Generic Resizer Logic
-   */
   initResizers(elements, config) {
     const setupResizer = (resizer, target, side) => {
       if (!resizer) return;
-      
       let isDragging = false;
       let startX = 0;
       let startWidth = 0;
@@ -304,20 +288,10 @@ export const SidebarManager = {
         if (!isDragging) return;
         const delta = side === 'left' ? (e.clientX - startX) : (startX - e.clientX);
         let newWidth = startWidth + delta;
-
-        // Constraint logic
         const minMiddleWidth = Math.max(400, window.innerWidth * 0.3);
         const oppositeWidth = (side === 'left' ? elements.rightSidebar : elements.sidebar).getBoundingClientRect().width;
-        
-        // Use 1/3 only as a preference on wide screens, but always allow at least 300px
-        const maxAllowedByMiddle = window.innerWidth - oppositeWidth - minMiddleWidth;
-        const maxAllowedByThird = window.innerWidth / 3;
-        
-        // On very narrow screens, we must allow the sidebar to reach its minimum usable width (300px)
-        const maxAllowed = Math.max(300, Math.min(maxAllowedByMiddle, maxAllowedByThird));
-
+        const maxAllowed = Math.max(300, Math.min(window.innerWidth - oppositeWidth - minMiddleWidth, window.innerWidth / 3));
         newWidth = Math.max(300, Math.min(newWidth, maxAllowed));
-        
         target.style.width = `${newWidth}px`;
         config[configKey] = newWidth;
       });
