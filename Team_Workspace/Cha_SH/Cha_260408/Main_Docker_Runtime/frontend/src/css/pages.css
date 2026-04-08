@@ -1,0 +1,330 @@
+/* ==========================================================
+   COMMON PAGE STYLES (Settings, Account, Help)
+   ========================================================== */
+
+/* Removed redundant backgrounds to prevent "messy" glass overlap */
+.page-view-content {
+  text-align: left;
+  width: 100%;
+  max-width: 680px;
+  margin: auto; /* Changed to auto for both vertical and horizontal centering */
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  animation: messageFadeIn 0.4s ease-out;
+}
+
+.page-title {
+  margin-top: 10px;
+  margin-bottom: clamp(15px, 4vh, 30px);
+  text-align: center;
+  font-size: clamp(20px, 4vw, 28px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: rgba(17, 24, 39, 0.9);
+}
+
+.settings-group {
+  margin-bottom: clamp(10px, 2vh, 20px);
+  padding: clamp(16px, 3vh, 24px) clamp(20px, 4vw, 28px);
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.04);
+}
+
+.settings-label {
+  display: block;
+  margin-bottom: 16px;
+  font-weight: 700;
+  font-size: 15px;
+  color: rgba(17, 24, 39, 0.8);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.slider-container {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.slider-hint {
+  font-size: 12px;
+  color: rgba(31, 41, 55, 0.5);
+}
+
+.settings-description {
+  font-size: 13px;
+  color: rgba(31, 41, 55, 0.5);
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
+/* Account specific */
+.profile-header {
+  text-align: center;
+  margin-bottom: clamp(15px, 4vh, 32px);
+}
+
+.profile-avatar {
+  width: clamp(60px, 10vh, 90px);
+  height: clamp(60px, 10vh, 90px);
+  background: white;
+  border-radius: clamp(18px, 3vh, 32px);
+  margin: 0 auto clamp(8px, 2vh, 16px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+  color: rgba(17, 24, 39, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.03);
+}
+
+.profile-name {
+  margin-bottom: 4px;
+  font-size: clamp(16px, 3vh, 22px);
+  font-weight: 800;
+  color: #111827;
+}
+
+.profile-email {
+  font-size: clamp(11px, 2vh, 14px);
+  color: rgba(107, 114, 128, 0.8);
+}
+
+/* Help specific */
+.help-item {
+  margin-bottom: 16px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.help-question {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: rgba(17, 24, 39, 0.85);
+}
+
+.help-answer {
+  font-size: 14px;
+  color: rgba(31, 41, 55, 0.65);
+  line-height: 1.6;
+}
+
+.slider-wrapper {
+  padding: 10px 0 20px;
+}
+
+.range-with-ticks {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.slider-ticks {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 2px;
+  margin-top: 8px;
+}
+
+.slider-ticks span {
+  width: 1px;
+  height: 6px;
+  background: rgba(17, 24, 39, 0.2);
+}
+
+/* Range input styling */
+input[type="range"] {
+  width: 100%;
+  cursor: pointer;
+  margin: 0;
+}
+
+/* --- Login & Account Enhancement --- */
+.login-form-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(8px, 1.5vh, 14px);
+}
+
+.login-input {
+  width: 100%;
+  padding: clamp(10px, 1.5vh, 14px) 18px;
+  border-radius: clamp(10px, 2vh, 16px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.8);
+  color: #111827;
+  font-size: clamp(13px, 1.5vh, 15px);
+  font-weight: 500;
+  outline: none;
+  box-sizing: border-box; /* Ensures padding doesn't cause overflow */
+  transition: all 0.2s ease;
+}
+
+.login-input:focus {
+  border-color: #3b82f6;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+}
+
+.login-options {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 4px;
+}
+
+.remember-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: clamp(11px, 1.5vh, 13px);
+  font-weight: 500;
+  color: rgba(31, 41, 55, 0.6);
+  cursor: pointer;
+}
+
+.find-account-link {
+  font-size: clamp(11px, 1.5vh, 13px);
+  font-weight: 600;
+  color: #3b82f6;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.login-actions {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(6px, 1.5vh, 12px);
+  margin-top: clamp(6px, 1.5vh, 10px);
+}
+
+.login-btn {
+  height: clamp(38px, 5vh, 52px);
+  padding: 0 20px;
+  border-radius: clamp(10px, 2vh, 16px);
+  border: none;
+  font-weight: 700;
+  font-size: clamp(13px, 1.5vh, 15px);
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-sizing: border-box; /* Ensures padding doesn't cause overflow */
+}
+
+.login-btn.primary {
+  background: #111827;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.login-btn.primary:hover {
+  background: #000;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+}
+
+.login-btn.secondary {
+  background: #fff;
+  color: #374151;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.login-btn.secondary:hover {
+  background: #f9fafb;
+  transform: translateY(-2px);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.social-login-divider {
+  display: flex;
+  align-items: center;
+  margin: clamp(10px, 2vh, 20px) 0;
+  color: rgba(0, 0, 0, 0.15);
+  font-size: clamp(10px, 1.2vh, 12px);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.social-login-divider::before,
+.social-login-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  margin: 0 15px;
+}
+
+.social-login-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(8px, 1.5vh, 12px);
+}
+
+.login-btn.social {
+  height: clamp(34px, 4.5vh, 48px);
+  font-size: clamp(12px, 1.4vh, 14px);
+  border-radius: clamp(8px, 1.5vh, 14px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.login-btn.google {
+  background: #ffffff;
+  color: #1f2937;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.login-btn.kakao {
+  background: #FEE500;
+  color: #191919;
+}
+
+.login-btn.naver {
+  background: #03C75A;
+  color: #fff;
+}
+
+.login-btn.signup {
+  background: rgba(59, 130, 246, 0.08);
+  color: #2563eb;
+  border: 1px solid rgba(59, 130, 246, 0.15);
+}
+
+.login-btn.social:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+@media (max-width: 480px) {
+  .page-view-content {
+    padding: 10px 0;
+  }
+  .settings-group {
+    padding: 20px;
+    border-radius: 20px;
+  }
+  .social-login-grid {
+    grid-template-columns: 1fr;
+  }
+  .login-btn {
+    height: 48px;
+  }
+}

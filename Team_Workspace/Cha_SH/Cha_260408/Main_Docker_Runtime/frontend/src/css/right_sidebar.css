@@ -1,0 +1,113 @@
+/* ==========================================================
+   RIGHT SIDEBAR (오른쪽 사이드바 - 지도 영역)
+   ========================================================== */
+.right-sidebar {
+  position: relative;
+  width: 420px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 18px; /* Match left sidebar padding */
+  border-left: 1px solid rgba(255, 255, 255, 0.20);
+  background: var(--sidebar-bg, rgba(255, 255, 255, 0.22));
+  backdrop-filter: blur(35px);
+  -webkit-backdrop-filter: blur(35px);
+  transition: width 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
+  overflow: hidden !important;
+  border-bottom-right-radius: 32px; /* Match main-panel radius */
+}
+
+.right-sidebar.collapsed {
+  width: 0 !important;
+  padding: 0 !important;
+  opacity: 0;
+  border-left: none;
+  border-bottom-right-radius: 0;
+}
+
+.right-sidebar-header {
+  padding: 0 10px;
+  margin-bottom: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.right-sidebar-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: rgba(17, 24, 39, 0.90);
+  letter-spacing: 0.1em;
+}
+
+.close-right-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: rgba(17, 24, 39, 0.6);
+  padding: 6px;
+  border-radius: 8px;
+  transition: 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-right-btn:hover {
+  background: rgba(255, 255, 255, 0.4);
+  color: rgba(17, 24, 39, 1);
+}
+
+.right-sidebar-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 10px; /* Internal side padding */
+}
+
+#kakaoMapContainer {
+  width: 100%;
+  aspect-ratio: 1 / 1; /* Make it square */
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+  position: relative;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  margin-bottom: 24px; /* Space below for better UX */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.right-sidebar.notransition {
+  transition: none !important;
+}
+
+/* 리사이저 */
+.right-sidebar-resizer {
+  position: absolute;
+  top: 0;
+  left: 0 !important;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  background-color: transparent;
+  z-index: 9999;
+  transition: background-color 0.2s ease;
+}
+
+.right-sidebar-resizer:hover,
+.right-sidebar-resizer.active {
+  background-color: rgba(59, 130, 246, 0.5);
+}
+
+.map-drag-shield::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: transparent;
+}

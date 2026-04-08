@@ -1,0 +1,29 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: TA_redis
+    command: /bin/sh -c 'redis-server --requirepass "$${REDIS_PASSWORD}"'
+    env_file:
+      - ./setting/.env
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./db/redis_data:/data
+    networks:
+      - TravelArchiveNetwork
+    restart: always
+
+  redis-insight:
+    image: redis/redisinsight:latest
+    container_name: TA_redis_insight
+    ports:
+      - "5540:5540" # RedisInsight의 기본 포트는 5540입니다.
+    networks:
+      - TravelArchiveNetwork
+    depends_on:
+      - redis
+    restart: always
+
+networks:
+  TravelArchiveNetwork:
+    external: true
