@@ -88,13 +88,12 @@ class PlanRequest(BaseModel):
     plan: List[Dict]
 
 class TripRangeRequest(BaseModel):
-    start_date: str
-    length: int
+    ranges: List[Dict]
 
 # ==========================================
 # Mock DB Storage
 # ==========================================
-mock_trip_ranges: Dict[str, Dict] = {} # {session_id: {"start_date": "...", "length": 3}}
+mock_trip_ranges: Dict[str, List[Dict]] = {} # {session_id: [{"start": "...", "end": "..."}]}
 mock_memos: Dict[str, Dict[str, str]] = {} # {session_id: {date_key: content}}
 mock_plans: Dict[str, Dict[str, List]] = {} # {session_id: {date_key: [plan_items]}}
 
@@ -197,12 +196,12 @@ async def get_map_markers(session_id: str):
 
 @app.put("/api/sessions/{session_id}/trip_range")
 async def save_trip_range(session_id: str, req: TripRangeRequest):
-    mock_trip_ranges[session_id] = req.dict()
+    mock_trip_ranges[session_id] = req.ranges
     return {"success": True}
 
 @app.get("/api/sessions/{session_id}/trip_range")
 async def get_trip_range(session_id: str):
-    return mock_trip_ranges.get(session_id, {"start_date": None, "length": 0})
+    return {"ranges": mock_trip_ranges.get(session_id, [])}
 
 @app.put("/api/sessions/{session_id}/memo")
 async def save_memo(session_id: str, date: str, req: MemoRequest):

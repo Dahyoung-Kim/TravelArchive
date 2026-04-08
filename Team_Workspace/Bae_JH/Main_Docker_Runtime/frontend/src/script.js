@@ -44,7 +44,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     calendarHeaderControls: document.getElementById('calendarHeaderControls'),
     toggleCalendarBtn: document.getElementById('toggleCalendarBtn'),
     calendarContent: document.getElementById('calendarContent'),
-    pinRangeBtn: document.getElementById('pinRangeBtn'),
     toggleScheduleBtn: document.getElementById('toggleScheduleBtn'),
     scheduleContent: document.getElementById('scheduleContent'),
     addScheduleRowBtn: document.getElementById('addScheduleRowBtn'),

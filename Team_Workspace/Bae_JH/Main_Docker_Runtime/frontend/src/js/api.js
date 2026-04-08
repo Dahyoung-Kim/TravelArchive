@@ -345,14 +345,14 @@ export const BackendHooks = {
   },
 
   /**
-   * saves the trip range (start date and length) for a specific session.
+   * saves the trip ranges for a specific session.
    */
-  async saveTripRange(sessionId, startDate, length) {
+  async saveTripRange(sessionId, ranges) {
     try {
       const res = await fetch(`/api/sessions/${sessionId}/trip_range`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start_date: startDate, length })
+        body: JSON.stringify({ ranges })
       });
       return await res.json();
     } catch (error) {
@@ -361,16 +361,16 @@ export const BackendHooks = {
   },
 
   /**
-   * fetches the trip range for a specific session.
+   * fetches the trip ranges for a specific session.
    */
   async fetchTripRange(sessionId) {
     try {
-      if (!sessionId || sessionId === 'default') return { start_date: null, length: 0 };
+      if (!sessionId || sessionId === 'default') return { ranges: [] };
       const res = await fetch(`/api/sessions/${sessionId}/trip_range`);
-      if (!res.ok) return { start_date: null, length: 0 };
+      if (!res.ok) return { ranges: [] };
       return await res.json();
     } catch (error) {
-      return { start_date: null, length: 0 };
+      return { ranges: [] };
     }
   },
 

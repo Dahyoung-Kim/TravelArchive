@@ -6,13 +6,11 @@
 import { renderTemplate } from './utils.js';
 import { BackendHooks } from './api.js';
 
-let currentViewDate = new Date(); // The month/year we're looking at
-let selectedDate = new Date(); // The actual focused date (Dark Blue)
-let previewRangeLength = 1; // Range duration being adjusted (1 to 7 days)
-let pinnedStartDate = null; // Locked start date
-let pinnedRangeLength = 0; // Locked duration
-let isPinned = false; 
-let referenceTodayDate = new Date(); // True today from backend
+let currentViewDate = new Date(); 
+let selectedDate = new Date(); // Focus date (Left Click)
+let tripRanges = []; // Array of {start: Date, end: Date}
+let rangeSelectionStart = null; // Temporary start for right-click range selection
+let referenceTodayDate = new Date();
 
 const isSameDay = (d1, d2) => 
   d1 && d2 &&
@@ -20,8 +18,9 @@ const isSameDay = (d1, d2) =>
   d1.getMonth() === d2.getMonth() && 
   d1.getDate() === d2.getDate();
 
+const formatDate = (date) => `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`;
+
 export const CalendarManager = {
-  // Callback to be set by SidebarManager
   onDateSelect: null,
 
   init(todayDate) {
@@ -50,33 +49,34 @@ export const CalendarManager = {
     return selectedDate;
   },
 
-  getRange() {
-    return isPinned ? pinnedRangeLength : previewRangeLength;
-  },
-
   async refreshDots() {
     await this.updateUI();
   },
 
   async loadTripRange(sessionId) {
     if (!sessionId || sessionId === 'default') {
-        isPinned = false;
-        pinnedStartDate = null;
-        pinnedRangeLength = 0;
+        tripRanges = [];
+        rangeSelectionStart = null;
         await this.updateUI();
         return;
     }
     const data = await BackendHooks.fetchTripRange(sessionId);
-    if (data && data.start_date) {
-        isPinned = true;
-        pinnedStartDate = new Date(data.start_date);
-        pinnedRangeLength = data.length;
-    } else {
-        isPinned = false;
-        pinnedStartDate = null;
-        pinnedRangeLength = 0;
-    }
+    tripRanges = (data.ranges || []).map(r => ({
+        start: new Date(r.start),
+        end: new Date(r.end)
+    }));
+    rangeSelectionStart = null;
     await this.updateUI();
+  },
+
+  async saveRanges() {
+    const sessionId = window.location.hash.split('/chat/')[1] || 'default';
+    if (sessionId === 'default') return;
+    const rangesToSave = tripRanges.map(r => ({
+        start: formatDate(r.start),
+        end: formatDate(r.end)
+    }));
+    await BackendHooks.saveTripRange(sessionId, rangesToSave);
   },
 
   async updateUI(forceFullUpdate = false) {
@@ -85,9 +85,6 @@ export const CalendarManager = {
     const prevBtn = document.getElementById('prevMonthBtn');
     const nextBtn = document.getElementById('nextMonthBtn');
     const todayBtn = document.getElementById('todayBtn');
-    const prevBtnHeader = document.getElementById('prevMonthBtnHeader');
-    const nextBtnHeader = document.getElementById('nextMonthBtnHeader');
-    const pinBtn = document.getElementById('pinRangeBtn');
 
     if (!titleEl || !daysContainer) {
         if (this.container) {
@@ -110,12 +107,6 @@ export const CalendarManager = {
     const indicators = await BackendHooks.fetchMonthDataIndicators(sessionId, year, month + 1);
     const hasData = (y, m, d) => indicators.includes(`${y}-${m+1}-${d}`);
 
-    // Ranges for visualization
-    const activeStartDate = isPinned ? pinnedStartDate : selectedDate;
-    const activeRangeLength = isPinned ? pinnedRangeLength : previewRangeLength;
-    const activeEndDate = new Date(activeStartDate);
-    activeEndDate.setDate(activeStartDate.getDate() + activeRangeLength - 1);
-
     const createDaySpan = (date, isCurrentMonth, opacity = '1') => {
         const span = document.createElement('span');
         span.textContent = date;
@@ -132,13 +123,15 @@ export const CalendarManager = {
         const targetDate = new Date(dYear, dMonth, date);
         targetDate.setHours(0, 0, 0, 0);
 
+        // Check if in any range
+        const isInTripRange = tripRanges.some(r => targetDate >= r.start && targetDate <= r.end);
+        const isSelectionStart = rangeSelectionStart && isSameDay(targetDate, rangeSelectionStart);
         const isSelectedFocus = isSameDay(targetDate, selectedDate);
-        const isInRange = targetDate >= activeStartDate && targetDate <= activeEndDate;
 
         if (isSelectedFocus) {
-            span.classList.add('active'); // Dark blue square
-        } else if (isInRange) {
-            span.classList.add('range-mid'); // Light blue rect
+            span.classList.add('active'); // Dark Blue
+        } else if (isInTripRange || isSelectionStart) {
+            span.classList.add('range-mid'); // Light Blue
         }
         
         if (hasData(dYear, dMonth, date)) {
@@ -147,17 +140,40 @@ export const CalendarManager = {
             span.appendChild(dot);
         }
 
-        span.onclick = async () => {
-            if (!isPinned) {
-                // Not pinned: change the start of preview range
-                selectedDate = new Date(targetDate);
-            } else {
-                // Pinned: just change the focused date for sidebar
-                selectedDate = new Date(targetDate);
-            }
+        // Left Click: Focus & Edit
+        span.onclick = async (e) => {
+            e.preventDefault();
+            selectedDate = new Date(targetDate);
             await this.updateUI();
             if (this.onDateSelect) this.onDateSelect(selectedDate);
         };
+
+        // Right Click: Range Management
+        span.oncontextmenu = async (e) => {
+            e.preventDefault();
+            
+            // If already in a range, and it's the second click or special, we could delete.
+            // But let's stick to the 2-click selection rule.
+            if (!rangeSelectionStart) {
+                // Check if we clicked on existing range to delete it
+                const existingRangeIdx = tripRanges.findIndex(r => targetDate >= r.start && targetDate <= r.end);
+                if (existingRangeIdx !== -1) {
+                    tripRanges.splice(existingRangeIdx, 1);
+                    await this.saveRanges();
+                } else {
+                    rangeSelectionStart = new Date(targetDate);
+                }
+            } else {
+                // Second click: finalize range
+                const start = new Date(Math.min(rangeSelectionStart, targetDate));
+                const end = new Date(Math.max(rangeSelectionStart, targetDate));
+                tripRanges.push({ start, end });
+                rangeSelectionStart = null;
+                await this.saveRanges();
+            }
+            await this.updateUI();
+        };
+
         return span;
     };
 
@@ -177,56 +193,9 @@ export const CalendarManager = {
     if (prevBtn) prevBtn.onclick = (e) => (e.stopPropagation(), handleMonth(-1));
     if (nextBtn) nextBtn.onclick = (e) => (e.stopPropagation(), handleMonth(1));
 
-    if (prevBtnHeader) {
-        prevBtnHeader.onclick = async (e) => {
-            e.stopPropagation();
-            if (isPinned) {
-                if (pinnedRangeLength > 1) pinnedRangeLength--;
-            } else {
-                if (previewRangeLength > 1) previewRangeLength--;
-            }
-            await this.updateUI();
-        };
-    }
-    if (nextBtnHeader) {
-        nextBtnHeader.onclick = async (e) => {
-            e.stopPropagation();
-            if (isPinned) {
-                if (pinnedRangeLength < 7) pinnedRangeLength++;
-            } else {
-                if (previewRangeLength < 7) previewRangeLength++;
-            }
-            await this.updateUI();
-        };
-    }
-
-    if (pinBtn) {
-        pinBtn.style.background = isPinned ? 'rgba(59, 130, 246, 0.2)' : 'none';
-        pinBtn.onclick = async (e) => {
-            e.stopPropagation();
-            isPinned = !isPinned;
-            if (isPinned) {
-                pinnedStartDate = new Date(selectedDate);
-                pinnedRangeLength = previewRangeLength;
-                
-                const sessionId = window.location.hash.split('/chat/')[1] || 'default';
-                if (sessionId !== 'default') {
-                    const dateStr = `${pinnedStartDate.getFullYear()}-${pinnedStartDate.getMonth()+1}-${pinnedStartDate.getDate()}`;
-                    await BackendHooks.saveTripRange(sessionId, dateStr, pinnedRangeLength);
-                }
-            } else {
-                pinnedStartDate = null;
-                pinnedRangeLength = 0;
-                // Optionally clear from backend
-            }
-            await this.updateUI();
-        };
-    }
-
     if (todayBtn) {
         todayBtn.onclick = async (e) => {
           e.stopPropagation();
-          isPinned = false; // Reset pin on today click? Or keep? User choice.
           await this.setSelectedDate(new Date(referenceTodayDate));
         };
     }

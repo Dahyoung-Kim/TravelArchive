@@ -231,21 +231,6 @@ export const SidebarManager = {
     };
 
     setupFolding(elements.toggleCalendarBtn, elements.calendarContent, isSmallHeight);
-    
-    // Add logic to also toggle the extra header buttons for calendar
-    if (elements.toggleCalendarBtn) {
-        elements.toggleCalendarBtn.addEventListener('click', () => {
-            const isCollapsed = elements.toggleCalendarBtn.classList.contains('collapsed');
-            [elements.prevMonthBtnHeader, elements.nextMonthBtnHeader, elements.pinRangeBtn].forEach(btn => {
-                if (btn) {
-                    btn.classList.toggle('disabled', isCollapsed);
-                    btn.style.pointerEvents = isCollapsed ? 'none' : 'auto';
-                    btn.style.opacity = isCollapsed ? '0.3' : '1';
-                }
-            });
-        });
-    }
-
     setupFolding(elements.toggleScheduleBtn, elements.scheduleContent, isSmallHeight);
     setupFolding(elements.toggleMemoBtn, elements.memoContent, isSmallHeight);
 
