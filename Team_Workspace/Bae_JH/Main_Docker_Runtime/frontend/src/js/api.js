@@ -59,11 +59,6 @@ export const TokenManager = {
     }
     return true;
   },
-  isGuest() {
-    if (!this.isLoggedIn()) return false;
-    const t = localStorage.getItem(this._keys.userType);
-    return t === 'GST';
-  },
   isMember() {
     if (!this.isLoggedIn()) return false;
     const t = localStorage.getItem(this._keys.userType);
@@ -158,28 +153,6 @@ export const BackendHooks = {
   },
 
   /**
-   * 게스트 로그인.
-   */
-  async guestLogin() {
-    const res = await fetch('/api/auth/guest', { method: 'POST' });
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw { status: res.status, detail: data.detail || '게스트 로그인에 실패했습니다' };
-    }
-
-    if (data.access_token && data.refresh_token) {
-      TokenManager.setTokens(data.access_token, data.refresh_token);
-      TokenManager.setUserInfo({
-        userId: data.user_id,
-        userType: data.type || 'GST',
-        nickname: '게스트',
-      });
-    }
-    return data;
-  },
-
-  /**
    * 회원가입.
    */
   async signUp(userData) {
@@ -229,11 +202,38 @@ export const BackendHooks = {
   },
 
   /**
-   * SNS 로그인 (Phase 7).
+   * 카카오 로그인 — 백엔드 OAuth 인가 URL로 리다이렉트.
    */
-  async socialLogin(provider) {
-    const res = await fetch(`/api/auth/social/${provider}`, { method: 'POST' });
-    return await res.json();
+  kakaoLogin() {
+    window.location.href = '/api/auth/kakao';
+  },
+
+  /**
+   * 비로그인 임시 챗봇 메시지 전송 (스트리밍).
+   * temp_session_id 는 호출자가 sessionStorage 등에서 관리.
+   */
+  async sendTempMessage(tempSessionId, message, onChunkReceived, onCompleted) {
+    try {
+      const response = await fetch(`/api/temp/${encodeURIComponent(tempSessionId)}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      });
+      if (!response.body) throw new Error('Streaming not supported');
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let currentText = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        currentText += decoder.decode(value, { stream: true });
+        onChunkReceived(currentText);
+      }
+      onCompleted();
+    } catch (error) {
+      console.error('API Error (sendTempMessage):', error);
+      onCompleted();
+    }
   },
 
   /**
@@ -248,21 +248,120 @@ export const BackendHooks = {
   // 세션 API
   // --------------------------------------------------
 
-  async fetchPlanList() {
+  // --------------------------------------------------
+  // 여행(Trip) API
+  // --------------------------------------------------
+
+  async fetchTripList() {
     try {
-      const res = await this._authFetch('/api/plans');
+      const res = await this._authFetch('/api/trips');
       if (!res.ok) return [];
-      return await res.json();
+      const data = await res.json();
+      return data.trips || [];
     } catch (error) {
-      console.error("API Error (fetchPlanList):", error);
+      console.error('API Error (fetchTripList):', error);
       return [];
     }
   },
 
-  async fetchSessionList(mode = 'personal', planId = null) {
+  async createTrip(data) {
+    try {
+      const res = await this._authFetch('/api/trips', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch (error) {
+      console.error('API Error (createTrip):', error);
+      throw error;
+    }
+  },
+
+  async updateTrip(tripId, data) {
+    try {
+      const res = await this._authFetch(`/api/trips/${tripId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch (error) {
+      console.error('API Error (updateTrip):', error);
+      throw error;
+    }
+  },
+
+  async deleteTrip(tripId) {
+    try {
+      const res = await this._authFetch(`/api/trips/${tripId}`, { method: 'DELETE' });
+      return await res.json();
+    } catch (error) {
+      console.error('API Error (deleteTrip):', error);
+      throw error;
+    }
+  },
+
+  // 하위 호환 별칭
+  async fetchPlanList() {
+    return this.fetchTripList();
+  },
+
+  // --------------------------------------------------
+  // 팀(Team) API
+  // --------------------------------------------------
+
+  async fetchTeamList() {
+    try {
+      const res = await this._authFetch('/api/teams');
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.teams || [];
+    } catch (error) {
+      console.error('API Error (fetchTeamList):', error);
+      return [];
+    }
+  },
+
+  async fetchTeamSessions(teamId) {
+    try {
+      const res = await this._authFetch(`/api/teams/${teamId}/sessions`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.sessions || [];
+    } catch (error) {
+      console.error('API Error (fetchTeamSessions):', error);
+      return [];
+    }
+  },
+
+  // --------------------------------------------------
+  // 세션 플러시 (창 닫기 전 저장)
+  // --------------------------------------------------
+
+  flushSessions() {
+    // sendBeacon을 사용해 페이지 언로드 중에도 전송
+    const token = TokenManager.getAccessToken();
+    if (!token) return;
+    const data = JSON.stringify({});
+    navigator.sendBeacon
+      ? navigator.sendBeacon('/api/sessions/flush', new Blob([data], { type: 'application/json' }))
+      : fetch('/api/sessions/flush', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: data,
+          keepalive: true,
+        }).catch(() => {});
+  },
+
+  // --------------------------------------------------
+  // 세션 API
+  // --------------------------------------------------
+
+  async fetchSessionList(mode = 'personal', tripId = null) {
     try {
       const params = new URLSearchParams({ mode });
-      if (planId) params.set('plan_id', planId);
+      if (tripId) params.set('trip_id', tripId);
       const res = await this._authFetch(`/api/sessions?${params}`);
       if (!res.ok) return [];
       const data = await res.json();
@@ -273,10 +372,10 @@ export const BackendHooks = {
     }
   },
 
-  async createSession(firstMessage, mode = 'personal', planId = null) {
+  async createSession(firstMessage, mode = 'personal', tripId = null) {
     try {
       const body = { first_message: firstMessage, mode };
-      if (planId) body.plan_id = planId;
+      if (tripId) body.trip_id = tripId;
       const res = await this._authFetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -301,6 +400,71 @@ export const BackendHooks = {
       console.error("API Error (updateSessionMode):", error);
       throw error;
     }
+  },
+
+  async searchUsers(q) {
+    try {
+      const res = await this._authFetch(`/api/users/search?q=${encodeURIComponent(q)}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.users || [];
+    } catch (error) {
+      console.error('API Error (searchUsers):', error);
+      return [];
+    }
+  },
+
+  // 팀 채팅 SSE 구독 — 자동 재연결 포함, {close()} 반환
+  subscribeToSessionEvents(sessionId, onEvent, onError) {
+    let closed = false;
+    let retryDelay = 2000;
+
+    const connect = async () => {
+      while (!closed) {
+        const controller = new AbortController();
+        // close() 호출 시 현재 연결도 즉시 중단
+        _currentAbort = controller;
+        try {
+          const token = TokenManager.getAccessToken();
+          const res = await fetch(`/api/sessions/${sessionId}/events`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            signal: controller.signal,
+          });
+          if (!res.ok) throw new Error(`SSE ${res.status}`);
+          retryDelay = 2000; // 연결 성공 시 재연결 딜레이 초기화
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = '';
+          while (!closed) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const parts = buf.split('\n\n');
+            buf = parts.pop() ?? '';
+            for (const part of parts) {
+              const m = part.match(/^data: (.+)$/m);
+              if (m) { try { onEvent(JSON.parse(m[1])); } catch {} }
+            }
+          }
+        } catch (e) {
+          if (e.name === 'AbortError' || closed) return;
+          onError?.(e);
+        }
+        if (!closed) {
+          await new Promise(r => setTimeout(r, retryDelay));
+          retryDelay = Math.min(retryDelay * 1.5, 30000); // 최대 30초
+        }
+      }
+    };
+
+    let _currentAbort = null;
+    connect();
+    return {
+      close: () => {
+        closed = true;
+        _currentAbort?.abort();
+      }
+    };
   },
 
   async inviteUserToSession(sessionId, searchInput) {
@@ -369,11 +533,29 @@ export const BackendHooks = {
   async fetchChatHistory(sessionId) {
     try {
       const res = await this._authFetch(`/api/sessions/${sessionId}/history`);
-      if (!res.ok) return [];
-      return await res.json();
+      if (!res.ok) return { messages: [], mode: 'personal' };
+      const data = await res.json();
+      // {messages: [...], mode: 'personal'|'team'} 형태로 반환
+      if (Array.isArray(data)) return { messages: data, mode: 'personal' };
+      return { messages: data.messages || [], mode: data.mode || 'personal' };
     } catch (error) {
       console.error("API Error (fetchChatHistory):", error);
-      return [];
+      return { messages: [], mode: 'personal' };
+    }
+  },
+
+  async sendTeamMessage(sessionId, message) {
+    try {
+      const token = TokenManager.getAccessToken();
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      await fetch(`/api/sessions/${sessionId}/team-message`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ message }),
+      });
+    } catch (error) {
+      console.error('API Error (sendTeamMessage):', error);
     }
   },
 
@@ -777,6 +959,46 @@ export const BackendHooks = {
       return await res.json();
     } catch (error) {
       console.error('API Error (deleteAccount):', error);
+      throw error;
+    }
+  },
+
+  // --------------------------------------------------
+  // 알림 API
+  // --------------------------------------------------
+
+  async fetchNotifications() {
+    try {
+      const res = await this._authFetch('/api/notifications');
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.notifications || [];
+    } catch (error) {
+      console.error('API Error (fetchNotifications):', error);
+      return [];
+    }
+  },
+
+  async acceptNotification(notificationId) {
+    try {
+      const res = await this._authFetch(`/api/notifications/${notificationId}/accept`, {
+        method: 'POST',
+      });
+      return await res.json();
+    } catch (error) {
+      console.error('API Error (acceptNotification):', error);
+      throw error;
+    }
+  },
+
+  async dismissNotification(notificationId) {
+    try {
+      const res = await this._authFetch(`/api/notifications/${notificationId}/dismiss`, {
+        method: 'POST',
+      });
+      return await res.json();
+    } catch (error) {
+      console.error('API Error (dismissNotification):', error);
       throw error;
     }
   },

@@ -1,5 +1,6 @@
 """
-Auth 서비스: 회원가입, 로그인, 게스트, 토큰 갱신, 로그아웃 비즈니스 로직
+Auth 서비스: 회원가입, 로그인, 토큰 갱신, 로그아웃 비즈니스 로직
+게스트 로그인 없음 — 로그인/비로그인 이분 구조
 """
 import os
 import uuid
@@ -16,132 +17,88 @@ from .jwt_utils import (
 )
 from .password_utils import hash_password, verify_password
 
-# Redis TTL 상수
-TTL_GUEST = 24 * 3600  # 게스트: 24시간
-TTL_MEMBER = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7")) * 24 * 3600  # 회원: 7일
+TTL_MEMBER = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7")) * 24 * 3600  # 7일
 
 
 async def signup(postgres: PostgresManager, data: dict) -> dict:
     """
-    회원가입 (자체 계정).
+    자체 계정(MEM) 회원가입.
     data: { email, password, nickname }
     """
-    email = data.get("email")
-    password = data.get("password")
-    nickname = data.get("nickname", "")
+    email    = data.get("email", "").strip()
+    password = data.get("password", "")
+    nickname = data.get("nickname", "").strip()
 
     if not email or not password:
         raise HTTPException(status_code=400, detail="이메일과 비밀번호는 필수입니다")
 
-    # 1. 이메일 중복 확인
-    result = await postgres.execute({
-        "action": "read",
-        "model": "UserProfile",
-        "filters": {"email": email}
+    # 이메일 중복 확인
+    dup = await postgres.execute({
+        "action": "read", "model": "UserProfile", "filters": {"email": email}
     })
-
-    if result.get("status") == "success" and result.get("data"):
+    if dup.get("status") == "success" and dup.get("data"):
         raise HTTPException(status_code=409, detail="이미 가입된 이메일입니다")
 
-    # 2. user_id 생성
     user_id = "MEM:" + str(uuid.uuid4())
-    now = datetime.now(tz=timezone.utc)
-    print(f"[Signup] user_id={user_id}, email={email}")
+    now     = datetime.now(tz=timezone.utc)
 
-    # 3. users 테이블 insert
-    result = await postgres.execute({
-        "action": "create",
-        "model": "User",
-        "data": {
-            "user_id": user_id,
-            "user_type": "MEM",
-            "status": "active",
-            "created_at": now
-        }
-    })
-    print(f"[Signup] Step 3 (users): {result}")
-    if result.get("status") != "success":
-        raise HTTPException(status_code=500, detail=f"users 테이블 생성 실패: {result.get('reason')}")
+    for step, payload in [
+        ("users", {
+            "action": "create", "model": "User",
+            "data": {"user_id": user_id, "user_type": "MEM", "status": "active", "created_at": now},
+        }),
+        ("user_profile", {
+            "action": "create", "model": "UserProfile",
+            "data": {"user_id": user_id, "email": email, "nickname": nickname, "updated_at": now},
+        }),
+        ("user_security", {
+            "action": "create", "model": "UserSecurity",
+            "data": {"user_id": user_id, "password_hash": hash_password(password), "login_fail_count": 0},
+        }),
+        ("user_preferences", {
+            "action": "create", "model": "UserPreferences",
+            "data": {"user_id": user_id, "updated_at": now},
+        }),
+    ]:
+        result = await postgres.execute(payload)
+        if result.get("status") != "success":
+            raise HTTPException(status_code=500, detail=f"{step} 생성 실패: {result.get('reason')}")
 
-    # 4. user_profile 테이블 insert
-    result = await postgres.execute({
-        "action": "create",
-        "model": "UserProfile",
-        "data": {
-            "user_id": user_id,
-            "email": email,
-            "nickname": nickname,
-            "updated_at": now
-        }
-    })
-    print(f"[Signup] Step 4 (user_profile): {result}")
-    if result.get("status") != "success":
-        raise HTTPException(status_code=500, detail=f"user_profile 테이블 생성 실패: {result.get('reason')}")
-
-    # 5. user_security 테이블 insert
-    result = await postgres.execute({
-        "action": "create",
-        "model": "UserSecurity",
-        "data": {
-            "user_id": user_id,
-            "password_hash": hash_password(password),
-            "login_fail_count": 0
-        }
-    })
-    print(f"[Signup] Step 5 (user_security): {result}")
-    if result.get("status") != "success":
-        raise HTTPException(status_code=500, detail=f"user_security 테이블 생성 실패: {result.get('reason')}")
-
-    # 6. user_preference 테이블 insert
-    result = await postgres.execute({
-        "action": "create",
-        "model": "UserPreference",
-        "data": {
-            "user_id": user_id,
-            "updated_at": now
-        }
-    })
-    print(f"[Signup] Step 6 (user_preference): {result}")
-    if result.get("status") != "success":
-        raise HTTPException(status_code=500, detail=f"user_preference 테이블 생성 실패: {result.get('reason')}")
-
-    print(f"[Signup] 회원가입 완료: {user_id}")
     return {"user_id": user_id, "status": "success"}
 
 
 async def login(postgres: PostgresManager, redis: RedisManager, email: str, pw: str) -> dict:
-    """
-    자체 계정 로그인.
-    """
-    # 1. 이메일로 user_id 조회
-    result = await postgres.execute({
-        "action": "read",
-        "model": "UserProfile",
-        "filters": {"email": email}
+    """자체 계정(MEM) 로그인."""
+    # 이메일로 프로필 조회
+    prof_result = await postgres.execute({
+        "action": "read", "model": "UserProfile", "filters": {"email": email}
     })
-
-    if result.get("status") != "success" or not result.get("data"):
+    if prof_result.get("status") != "success" or not prof_result.get("data"):
         raise HTTPException(status_code=401, detail="존재하지 않는 계정입니다")
 
-    profile  = result["data"][0]
+    profile  = prof_result["data"][0]
     user_id  = profile["user_id"]
     nickname = profile.get("nickname", "")
-    email    = profile.get("email", "")
 
-    # 2. 보안 정보 조회
-    sec_result = await postgres.execute({
-        "action": "read",
-        "model": "UserSecurity",
-        "filters": {"user_id": user_id}
+    # user_type 확인 — MEM만 비밀번호 로그인 허용
+    user_result = await postgres.execute({
+        "action": "read", "model": "User", "filters": {"user_id": user_id}
     })
+    if user_result.get("status") == "success" and user_result.get("data"):
+        if user_result["data"][0].get("user_type") != "MEM":
+            raise HTTPException(status_code=400, detail="SNS 연동 계정입니다. 카카오 로그인을 이용해주세요")
 
+    # 보안 정보 조회
+    sec_result = await postgres.execute({
+        "action": "read", "model": "UserSecurity", "filters": {"user_id": user_id}
+    })
     if sec_result.get("status") != "success" or not sec_result.get("data"):
         raise HTTPException(status_code=500, detail="보안 정보 조회 실패")
 
     sec = sec_result["data"][0]
-
-    # 3. 계정 잠금 확인
     now = datetime.now(tz=timezone.utc)
+
+    # 계정 잠금 확인
     if sec.get("locked_until"):
         locked_until = sec["locked_until"]
         if isinstance(locked_until, str):
@@ -149,50 +106,30 @@ async def login(postgres: PostgresManager, redis: RedisManager, email: str, pw: 
         if locked_until > now:
             raise HTTPException(status_code=403, detail="계정이 잠겨 있습니다. 잠시 후 다시 시도하세요")
 
-    # 4. 패스워드 검증
+    # 비밀번호 검증
     if not verify_password(pw, sec["password_hash"]):
         fail_count = sec.get("login_fail_count", 0) + 1
+        update_data = {"login_fail_count": fail_count}
         if fail_count >= 5:
-            locked_until = now + timedelta(minutes=30)
-            await postgres.execute({
-                "action": "update",
-                "model": "UserSecurity",
-                "filters": {"user_id": user_id},
-                "data": {
-                    "login_fail_count": fail_count,
-                    "locked_until": locked_until
-                }
-            })
-            raise HTTPException(status_code=403, detail="로그인 5회 실패. 계정이 30분간 잠겼습니다")
+            update_data["locked_until"] = now + timedelta(minutes=30)
         await postgres.execute({
-            "action": "update",
-            "model": "UserSecurity",
-            "filters": {"user_id": user_id},
-            "data": {"login_fail_count": fail_count}
+            "action": "update", "model": "UserSecurity",
+            "filters": {"user_id": user_id}, "data": update_data,
         })
-        raise HTTPException(status_code=401, detail="비밀번호가 일치하지 않습니다")
+        if fail_count >= 5:
+            raise HTTPException(status_code=403, detail="로그인 5회 실패. 계정이 30분간 잠겼습니다")
+        raise HTTPException(status_code=401, detail=f"비밀번호가 일치하지 않습니다 ({fail_count}/5)")
 
-    # 5. 로그인 성공 갱신
+    # 로그인 성공 갱신
     await postgres.execute({
-        "action": "update",
-        "model": "UserSecurity",
+        "action": "update", "model": "UserSecurity",
         "filters": {"user_id": user_id},
-        "data": {
-            "last_login_at": now,
-            "login_fail_count": 0
-        }
+        "data": {"last_login_at": now, "login_fail_count": 0},
     })
 
-    # 6. 이중키 토큰 발급
-    access_token = create_access_token(user_id)
-    refresh_token, jti = create_refresh_token(user_id)  # 7일 TTL
-
-    # 7. Redis에 Refresh Token 저장 (auth:refresh:{jti} → user_id, TTL: 7일)
+    access_token, refresh_token, jti = _issue_tokens(user_id)
     await redis.execute({
-        "action": "set",
-        "key": f"auth:refresh:{jti}",
-        "value": user_id,
-        "ttl": TTL_MEMBER
+        "action": "set", "key": f"auth:refresh:{jti}", "value": user_id, "ttl": TTL_MEMBER,
     })
 
     return {
@@ -206,76 +143,33 @@ async def login(postgres: PostgresManager, redis: RedisManager, email: str, pw: 
     }
 
 
-async def guest_login(redis: RedisManager) -> dict:
-    """
-    게스트 로그인.
-    """
-    guest_uuid = str(uuid.uuid4())
-    user_id = "GST:" + guest_uuid
-
-    # 이중키 토큰 발급 (Refresh TTL = 24h)
-    access_token = create_access_token(user_id)
-    refresh_token, jti = create_refresh_token(user_id, ttl_seconds=TTL_GUEST)
-
-    # Redis에 게스트 세션 및 Refresh Token 저장 (TTL: 24시간)
-    await redis.execute({
-        "action": "hset",
-        "key": f"user:{user_id}",
-        "mapping": {"uuid": guest_uuid, "created_at": datetime.now(tz=timezone.utc).isoformat()},
-        "ttl": TTL_GUEST
-    })
-    await redis.execute({
-        "action": "set",
-        "key": f"auth:refresh:{jti}",
-        "value": user_id,
-        "ttl": TTL_GUEST
-    })
-
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "user_id": user_id,
-        "type": "GST",
-        "status": "success",
-    }
-
-
 async def refresh_token_service(redis: RedisManager, refresh_token: str) -> dict:
-    """
-    토큰 갱신.
-    Refresh Token의 JTI가 Redis에 존재하는지 확인 후 새 Access Token 발급.
-    """
+    """Refresh Token → 새 Access Token 발급."""
     payload = verify_refresh_token(refresh_token)
     user_id = payload["sub"]
-    jti = payload["jti"]
+    jti     = payload["jti"]
 
-    # Redis에서 토큰 유효성 확인 (로그아웃된 토큰 차단)
-    result = await redis.execute({
-        "action": "get",
-        "key": f"auth:refresh:{jti}"
-    })
+    result = await redis.execute({"action": "get", "key": f"auth:refresh:{jti}"})
     if result.get("status") != "success" or result.get("value") is None:
         raise HTTPException(status_code=401, detail="만료되었거나 로그아웃된 토큰입니다")
 
-    # 새 Access Token 발급
     new_access_token = create_access_token(user_id)
-
     return {"access_token": new_access_token, "status": "success"}
 
 
 async def logout(redis: RedisManager, refresh_token: str) -> None:
-    """
-    로그아웃: Redis에서 Refresh Token JTI 삭제 → 이후 토큰 갱신 차단.
-    이미 만료된 토큰이어도 로그아웃은 성공 처리.
-    """
+    """로그아웃: Refresh Token JTI 삭제 → 이후 갱신 차단."""
     try:
         payload = verify_refresh_token(refresh_token)
         jti = payload.get("jti")
         if jti:
-            await redis.execute({
-                "action": "delete",
-                "key": f"auth:refresh:{jti}"
-            })
+            await redis.execute({"action": "delete", "key": f"auth:refresh:{jti}"})
     except HTTPException:
-        # 만료/잘못된 토큰도 로그아웃 성공으로 처리
-        pass
+        pass  # 이미 만료/잘못된 토큰도 성공 처리
+
+
+def _issue_tokens(user_id: str) -> tuple[str, str, str]:
+    """Access Token + Refresh Token 동시 발급. (access, refresh, jti) 반환."""
+    access_token          = create_access_token(user_id)
+    refresh_token, jti    = create_refresh_token(user_id)
+    return access_token, refresh_token, jti

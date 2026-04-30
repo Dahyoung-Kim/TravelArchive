@@ -195,29 +195,30 @@ function _initCarousel(track) {
 }
 
 const CARD_PALETTE = [
-  { bg: 'rgba(219,234,254,0.72)', accent: '#2563eb', icon: '#3b82f6' },  // 블루
-  { bg: 'rgba(220,252,231,0.72)', accent: '#16a34a', icon: '#22c55e' },  // 그린
-  { bg: 'rgba(254,243,199,0.72)', accent: '#d97706', icon: '#f59e0b' },  // 앰버
-  { bg: 'rgba(243,232,255,0.72)', accent: '#7c3aed', icon: '#a78bfa' },  // 퍼플
-  { bg: 'rgba(255,228,230,0.72)', accent: '#e11d48', icon: '#fb7185' },  // 로즈
-  { bg: 'rgba(224,242,254,0.72)', accent: '#0284c7', icon: '#38bdf8' },  // 스카이
+  { bg: 'rgba(219,234,254,0.72)', accent: '#2563eb', icon: '#3b82f6' },
+  { bg: 'rgba(220,252,231,0.72)', accent: '#16a34a', icon: '#22c55e' },
+  { bg: 'rgba(254,243,199,0.72)', accent: '#d97706', icon: '#f59e0b' },
+  { bg: 'rgba(243,232,255,0.72)', accent: '#7c3aed', icon: '#a78bfa' },
+  { bg: 'rgba(255,228,230,0.72)', accent: '#e11d48', icon: '#fb7185' },
+  { bg: 'rgba(224,242,254,0.72)', accent: '#0284c7', icon: '#38bdf8' },
 ];
 
 const MAP_ICON = `<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>`;
 
-function _cardHTML(session, idx) {
-  const p = CARD_PALETTE[idx % CARD_PALETTE.length];
-  const dateLabel = session.created_at
-    ? session.created_at.replace(/-/g, '.').slice(0, 7)   // "YYYY.MM"
-    : '';
-  const modeLabel = session.mode === 'team' ? '팀 플래너' : '개인';
+function _tripCardHTML(trip, idx) {
+  // trip.color가 있으면 해당 색상, 없으면 팔레트 순환
+  const p   = CARD_PALETTE[idx % CARD_PALETTE.length];
+  const bg  = trip.color ? `${trip.color}33` : p.bg;       // hex+20% 알파
+  const acc = trip.color || p.accent;
+  const dateLabel = (trip.start_date || '').slice(0, 7).replace(/-/g, '.');
 
   return `
-    <div class="trip-card" data-session-id="${session.id}" style="--i:${idx}; --card-bg:${p.bg}; --card-accent:${p.accent}; --card-icon:${p.icon}">
+    <div class="trip-card" data-trip-id="${trip.trip_id}"
+         style="--i:${idx}; --card-bg:${bg}; --card-accent:${acc}; --card-icon:${acc}">
       <div class="trip-card-map-icon">${MAP_ICON}</div>
-      <div class="trip-card-title">${session.title || '이름 없는 여행'}</div>
+      <div class="trip-card-title">${trip.title || '이름 없는 여행'}</div>
       <div class="trip-card-footer">
-        <span class="trip-card-mode-badge">${modeLabel}</span>
+        ${trip.destination ? `<span class="trip-card-mode-badge">${trip.destination}</span>` : ''}
         ${dateLabel ? `<span class="trip-card-date">${dateLabel}</span>` : ''}
       </div>
     </div>
@@ -227,15 +228,16 @@ function _cardHTML(session, idx) {
 export const HomeManager = {
 
   /**
-   * @param {HTMLElement}  container    #homeDashboard
-   * @param {Function}     onNewSession 새 세션 생성 콜백 (script.js에서 주입)
+   * @param {HTMLElement} container    #homeDashboard
+   * @param {Function}    onNewSession  새 세션 생성 콜백 (destination: string|null)
+   * @param {Function}    onTripSelect  여행 카드 선택 콜백 (tripId, tripTitle, tripColor)
    */
-  async render(container, onNewSession) {
+  async render(container, onNewSession, onTripSelect) {
     const nickname = TokenManager.getNickname();
-    const sessions = await BackendHooks.fetchSessionList('personal');
+    const trips    = await BackendHooks.fetchTripList();
 
-    const cardsHTML = sessions.map((s, i) => _cardHTML(s, i)).join('');
-    const newCardIdx = sessions.length;
+    const cardsHTML  = trips.map((t, i) => _tripCardHTML(t, i)).join('');
+    const newCardIdx = trips.length;
 
     container.innerHTML = `
       <div class="home-dash">
@@ -248,74 +250,52 @@ export const HomeManager = {
 
           <div class="trip-card trip-card-new" style="--i:${newCardIdx}">
             <div class="trip-card-new-plus">+</div>
-            <div class="trip-card-new-label">새 여행 계획</div>
+            <div class="trip-card-new-label">새 대화 시작</div>
           </div>
         </div>
       </div>
 
       <div class="new-trip-overlay" id="newTripOverlay">
         <div class="new-trip-modal">
-          <p class="new-trip-modal-title">어디로 떠나시고 싶으신가요?</p>
+          <p class="new-trip-modal-title">새 대화를 시작합니다</p>
           <input class="new-trip-modal-input" id="newTripInput"
-                 placeholder="목적지를 입력하세요" autocomplete="off" />
+                 placeholder="첫 메시지를 입력하세요 (선택)" autocomplete="off" />
           <button class="new-trip-modal-submit" id="newTripSubmit" type="button">시작하기</button>
           <p class="new-trip-modal-hint">Enter로 시작 · Esc로 닫기</p>
         </div>
       </div>
     `;
 
-    // 기존 세션 카드 클릭
-    container.querySelectorAll('.trip-card[data-session-id]').forEach(card => {
+    // 여행 카드 클릭 → 세션 필터 (드롭다운과 동일 효과)
+    container.querySelectorAll('.trip-card[data-trip-id]').forEach(card => {
       card.addEventListener('click', () => {
-        window.location.hash = `#/chat/${card.dataset.sessionId}`;
+        const tid   = card.dataset.tripId;
+        const title = card.querySelector('.trip-card-title')?.textContent || '';
+        const color = card.style.getPropertyValue('--card-accent');
+        onTripSelect?.(tid, title, color);
       });
     });
 
-    // 새 여행 (+) 카드 클릭 → 모달 열기
-    const overlay    = container.querySelector('#newTripOverlay');
-    const tripInput  = container.querySelector('#newTripInput');
-    const submitBtn  = container.querySelector('#newTripSubmit');
+    // 새 대화 (+) 카드 → 모달 열기
+    const overlay   = container.querySelector('#newTripOverlay');
+    const tripInput = container.querySelector('#newTripInput');
+    const submitBtn = container.querySelector('#newTripSubmit');
 
-    function openModal() {
-      overlay.classList.add('visible');
-      tripInput.value = '';
-      setTimeout(() => tripInput.focus(), 60);
-    }
-
-    function closeModal() {
-      overlay.classList.remove('visible');
-    }
-
-    function submitModal() {
-      const dest = tripInput.value.trim();
-      closeModal();
-      onNewSession(dest || null);
-    }
+    const openModal  = () => { overlay.classList.add('visible'); tripInput.value = ''; setTimeout(() => tripInput.focus(), 60); };
+    const closeModal = () => overlay.classList.remove('visible');
+    const submitModal = () => { const msg = tripInput.value.trim(); closeModal(); onNewSession(msg || null); };
 
     container.querySelector('.trip-card-new').addEventListener('click', openModal);
-
-    overlay.addEventListener('click', e => {
-      if (e.target === overlay) closeModal();
-    });
-
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
     submitBtn.addEventListener('click', submitModal);
-
     tripInput.addEventListener('keydown', e => {
       if (e.key === 'Escape') { e.preventDefault(); closeModal(); return; }
-      if (e.key === 'Enter' && !e.isComposing) {
-        e.preventDefault();
-        submitModal();
-      }
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); submitModal(); }
     });
 
-    // 캐러셀 초기화 (DOM 삽입 후 레이아웃 계산을 위해 한 프레임 대기)
     const track = container.querySelector('.trip-card-track');
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => _initCarousel(track)); // 2-frame: 렌더 완료 보장
-    });
+    requestAnimationFrame(() => requestAnimationFrame(() => _initCarousel(track)));
   },
 
-  clear(container) {
-    container.innerHTML = '';
-  },
+  clear(container) { container.innerHTML = ''; },
 };

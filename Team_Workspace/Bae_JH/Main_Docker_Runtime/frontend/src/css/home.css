@@ -2,6 +2,29 @@
    HOME DASHBOARD — 여행 카드 대시보드
    ========================================================== */
 
+/* ── 임시 채팅 종료 버튼 ── */
+.exit-temp-chat-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 20px;
+  padding: 11px 22px;
+  border: 1px solid rgba(255,255,255,0.5);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.18);
+  color: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: background 0.18s, transform 0.15s;
+}
+.exit-temp-chat-btn:hover {
+  background: rgba(255,255,255,0.32);
+  transform: translateY(-1px);
+}
+
 /* 홈 대시보드 래퍼: hero flex 아이템 */
 .home-dashboard-wrapper {
   position: relative;

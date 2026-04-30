@@ -31,6 +31,12 @@
   - 현재 구현 상태
   - 향후 계획
 
+### 🚀 배포 & 인프라
+- **[RASPBERRY_PI_SETUP.md](RASPBERRY_PI_SETUP.md)** - Raspberry Pi 4B+ 환경 구축 가이드
+  - OS 설치부터 서비스 기동까지 전체 순서
+  - Docker, DuckDNS, SSL 설정
+  - 재부팅 자동 기동 설정
+
 ---
 
 ## 🚀 빠른 시작

@@ -1,1 +1,1 @@
-from .loader import Loader, MockDBInterface
+from .loader import Loader

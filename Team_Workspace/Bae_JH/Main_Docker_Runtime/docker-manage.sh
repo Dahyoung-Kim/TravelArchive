@@ -103,7 +103,7 @@ start_all() {
   for file in "${COMPOSE_FILES[@]}"; do
     if [ -f "$file" ]; then
       print_info "$file 실행 중..."
-      docker-compose -f "$file" up -d
+      docker compose -f "$file" up -d
     fi
   done
 
@@ -120,7 +120,7 @@ stop_all() {
   for file in "${COMPOSE_FILES[@]}"; do
     if [ -f "$file" ]; then
       print_info "$file 중지 중..."
-      docker-compose -f "$file" down
+      docker compose -f "$file" down
     fi
   done
 
@@ -154,7 +154,7 @@ remove_all() {
     for file in "${COMPOSE_FILES[@]}"; do
       if [ -f "$file" ]; then
         print_info "$file의 컨테이너 삭제..."
-        docker-compose -f "$file" rm -f
+        docker compose -f "$file" rm -f
       fi
     done
 
@@ -269,9 +269,9 @@ manage_database() {
 
   cd "$SCRIPT_DIR"
   case $db_choice in
-    1) docker-compose -f docker-compose-db.yml up -d && print_success "Database 시작됨" ;;
-    2) docker-compose -f docker-compose-db.yml down && print_success "Database 중지됨" ;;
-    3) docker-compose -f docker-compose-db.yml restart && print_success "Database 재부팅됨" ;;
+    1) docker compose -f docker-compose-db.yml up -d && print_success "Database 시작됨" ;;
+    2) docker compose -f docker-compose-db.yml down && print_success "Database 중지됨" ;;
+    3) docker compose -f docker-compose-db.yml restart && print_success "Database 재부팅됨" ;;
     4) docker logs --tail 50 -f TA_db ;;
     *) print_error "잘못된 선택입니다." ;;
   esac
@@ -290,9 +290,9 @@ manage_cache() {
 
   cd "$SCRIPT_DIR"
   case $cache_choice in
-    1) docker-compose -f docker-compose-redis.yml up -d && print_success "Cache 시작됨" ;;
-    2) docker-compose -f docker-compose-redis.yml down && print_success "Cache 중지됨" ;;
-    3) docker-compose -f docker-compose-redis.yml restart && print_success "Cache 재부팅됨" ;;
+    1) docker compose -f docker-compose-redis.yml up -d && print_success "Cache 시작됨" ;;
+    2) docker compose -f docker-compose-redis.yml down && print_success "Cache 중지됨" ;;
+    3) docker compose -f docker-compose-redis.yml restart && print_success "Cache 재부팅됨" ;;
     4) docker logs --tail 50 -f TA_redis ;;
     *) print_error "잘못된 선택입니다." ;;
   esac
@@ -311,9 +311,9 @@ manage_backend() {
 
   cd "$SCRIPT_DIR"
   case $backend_choice in
-    1) docker-compose -f docker-compose-system.yml up -d && print_success "Backend 시작됨" ;;
-    2) docker-compose -f docker-compose-system.yml down && print_success "Backend 중지됨" ;;
-    3) docker-compose -f docker-compose-system.yml restart && print_success "Backend 재부팅됨" ;;
+    1) docker compose -f docker-compose-system.yml up -d && print_success "Backend 시작됨" ;;
+    2) docker compose -f docker-compose-system.yml down && print_success "Backend 중지됨" ;;
+    3) docker compose -f docker-compose-system.yml restart && print_success "Backend 재부팅됨" ;;
     4) docker logs --tail 50 -f TA_backend ;;
     *) print_error "잘못된 선택입니다." ;;
   esac
@@ -332,9 +332,9 @@ manage_frontend() {
 
   cd "$SCRIPT_DIR"
   case $frontend_choice in
-    1) docker-compose -f docker-compose-nginx.yml up -d && print_success "Frontend 시작됨" ;;
-    2) docker-compose -f docker-compose-nginx.yml down && print_success "Frontend 중지됨" ;;
-    3) docker-compose -f docker-compose-nginx.yml restart && print_success "Frontend 재부팅됨" ;;
+    1) docker compose -f docker-compose-nginx.yml up -d && print_success "Frontend 시작됨" ;;
+    2) docker compose -f docker-compose-nginx.yml down && print_success "Frontend 중지됨" ;;
+    3) docker compose -f docker-compose-nginx.yml restart && print_success "Frontend 재부팅됨" ;;
     4) docker logs --tail 50 -f TA_nginx ;;
     *) print_error "잘못된 선택입니다." ;;
   esac
@@ -348,7 +348,7 @@ manage_frontend() {
 
 main() {
   # Docker 설치 확인
-  if ! command -v docker-compose &> /dev/null; then
+  if ! docker compose version &> /dev/null; then
     print_error "Docker Compose가 설치되어 있지 않습니다!"
     exit 1
   fi

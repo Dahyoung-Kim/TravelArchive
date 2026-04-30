@@ -2,6 +2,11 @@
 facade.py
 TravelArchive 백엔드 진입점 — 프론트엔드와의 연결만 담당.
 
+인증 구조:
+  - 로그인(MEM/KKO): 모든 기능 해금
+  - 비로그인: /api/temp/{id}/message 임시 챗봇만 사용 가능
+  - 게스트(GST) 개념 없음
+
 @app 라우트를 모두 정의하되 함수 본문은 두 클래스에 위임합니다.
   Loader  (backend/loader/)  — DB 접근이 필요한 모든 작업
   Router  (backend/router/)  — 세션·채팅·지도·메모·플래너 작업
@@ -23,7 +28,7 @@ load_dotenv(os.path.join(BASE_DIR, "setting", ".env"))
 # ── FastAPI / Pydantic ───────────────────────────────────────
 from fastapi import FastAPI, Request, Depends, UploadFile, File
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -49,7 +54,7 @@ app.add_middleware(
 
 
 # ============================================================
-# Pydantic 요청 모델 (API 계약 정의 — facade 책임)
+# Pydantic 요청 모델
 # ============================================================
 
 class SignUpRequest(BaseModel):
@@ -67,10 +72,14 @@ class RefreshRequest(BaseModel):
 class LogoutRequest(BaseModel):
     refresh_token: str
 
+class TempMessageRequest(BaseModel):
+    message: str
+
 class SessionCreateRequest(BaseModel):
     first_message: str
     mode: str = "personal"
-    plan_id: Optional[str] = None
+    trip_id: Optional[str] = None
+    plan_id: Optional[str] = None  # 하위 호환 (trip_id 별칭)
 
 class SessionModeUpdateRequest(BaseModel):
     mode: str
@@ -105,6 +114,24 @@ class PlanRequest(BaseModel):
 class TripRangeRequest(BaseModel):
     ranges: List[Dict]
 
+class TripCreateRequest(BaseModel):
+    title: str
+    color: Optional[str] = None
+    destination: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+class TripUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    color: Optional[str] = None
+    destination: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    status: Optional[str] = None
+
+class TeamCreateRequest(BaseModel):
+    name: str
+
 class UserProfileRequest(BaseModel):
     nickname: Optional[str] = None
     bio: Optional[str] = None
@@ -133,6 +160,20 @@ class UserTravelRequest(BaseModel):
 
 
 # ============================================================
+# 비로그인 임시 챗봇 API  (인증 불필요)
+# ============================================================
+
+@app.post("/api/temp/{temp_session_id}/message")
+async def send_temp_message(temp_session_id: str, req: TempMessageRequest):
+    """
+    비로그인 또는 로그인 후 임시채팅.
+    - 인증 없이 사용 가능
+    - DB/Redis 저장 없음 — 새로고침 시 사라짐
+    """
+    return await Router.send_temp_message(temp_session_id, req.message)
+
+
+# ============================================================
 # 인증 API  →  Loader
 # ============================================================
 
@@ -145,40 +186,60 @@ async def signup(req: SignUpRequest, request: Request):
 async def login(req: LoginRequest, request: Request):
     return await Loader.login(request.app.state.postgres, request.app.state.redis, req.id, req.pw)
 
-@app.post("/api/auth/guest")
-async def guest_login(request: Request):
-    return await Loader.guest_login(request.app.state.redis)
-
 @app.post("/api/auth/refresh")
 async def refresh(req: RefreshRequest, request: Request):
     return await Loader.refresh_token(request.app.state.redis, req.refresh_token)
 
 @app.post("/api/auth/logout")
-async def logout(req: LogoutRequest, request: Request):
-    await Loader.logout(request.app.state.redis, req.refresh_token)
+async def logout(req: LogoutRequest, request: Request,
+                 user_id: Optional[str] = Depends(get_optional_user)):
+    """로그아웃: 세션 플러시 후 Refresh Token 폐기."""
+    await Loader.logout(request.app.state.postgres, request.app.state.redis,
+                        req.refresh_token, user_id)
     return {"status": "success", "message": "로그아웃 되었습니다"}
 
 @app.post("/api/auth/logout/all")
 async def logout_all_devices(req: LogoutRequest, request: Request,
                               user_id: str = Depends(get_current_user)):
-    # TODO: 해당 user_id의 모든 refresh token 무효화
-    await Loader.logout(request.app.state.redis, req.refresh_token)
-    print(f"[Facade] {user_id} 전체 기기 로그아웃 (mock: 현재 토큰만 삭제)")
+    await Loader.logout(request.app.state.postgres, request.app.state.redis,
+                        req.refresh_token, user_id)
     return {"status": "success", "message": "모든 기기에서 로그아웃되었습니다"}
 
-@app.post("/api/auth/social/{provider}")
-async def social_login(provider: str):
-    return {"status": "not_implemented", "provider": provider}
+# ── 카카오 OAuth ─────────────────────────────────────────────
+
+@app.get("/api/auth/kakao")
+async def kakao_login_redirect():
+    from .auth.oauth_service import get_kakao_auth_url
+    return RedirectResponse(get_kakao_auth_url())
+
+@app.get("/api/auth/kakao/callback")
+async def kakao_callback(code: str, request: Request):
+    from .auth.oauth_service import kakao_callback as _kakao_callback
+    result = await _kakao_callback(code, request.app.state.postgres, request.app.state.redis)
+    # 카카오 첫 로그인 시 개인 팀 보장
+    try:
+        from .system.team_service import TeamService
+        await TeamService.ensure_personal_team(result["user_id"], request.app.state.postgres)
+    except Exception:
+        pass
+    from urllib.parse import quote
+    redirect_url = (
+        f"/?access_token={result['access_token']}"
+        f"&refresh_token={result['refresh_token']}"
+        f"&user_id={quote(result.get('user_id', ''))}"
+        f"&user_type={result['type']}"
+        f"&nickname={quote(result.get('nickname', ''))}"
+        f"&email={quote(result.get('email', '') or '')}"
+    )
+    return RedirectResponse(redirect_url)
+
+@app.post("/api/auth/social/link/kakao")
+async def link_kakao_account(user_id: str = Depends(get_current_user)):
+    return {"status": "not_implemented", "message": "카카오 계정 연동은 준비 중입니다"}
 
 @app.post("/api/auth/find")
 async def find_account():
     return {"status": "not_implemented"}
-
-@app.post("/api/auth/social/link/{provider}")
-async def link_social_account(provider: str, user_id: str = Depends(get_current_user)):
-    # TODO: OAuth 플로우 연동
-    print(f"[Facade] {user_id} SNS 연동 요청: {provider}")
-    return {"status": "not_implemented", "message": f"{provider} 연동은 준비 중입니다."}
 
 @app.get("/api/auth/me")
 async def get_my_info(request: Request, user_id: str = Depends(get_current_user)):
@@ -186,7 +247,20 @@ async def get_my_info(request: Request, user_id: str = Depends(get_current_user)
 
 
 # ============================================================
-# 계정 / 설정 / 컨텍스트 / 날씨 / 도움말  →  Loader (또는 정적)
+# 세션 플러시 API  (창 닫기 / beforeunload 전용)
+# ============================================================
+
+@app.post("/api/sessions/flush")
+async def flush_sessions(request: Request, user_id: str = Depends(get_current_user)):
+    """beforeunload 또는 명시적 플러시 요청 시 Redis → Postgres 저장."""
+    from .system.flush_service import FlushService
+    await FlushService.flush_user_sessions(
+        user_id, request.app.state.postgres, request.app.state.redis)
+    return {"status": "success"}
+
+
+# ============================================================
+# 계정 / 설정 / 컨텍스트 / 날씨 / 도움말  →  Loader
 # ============================================================
 
 @app.get("/api/account")
@@ -194,51 +268,77 @@ async def get_account_info(request: Request, user_id: str = Depends(get_optional
     return await Loader.get_account_info(request.app.state.postgres, user_id)
 
 @app.put("/api/user/profile")
-async def save_user_profile(req: UserProfileRequest,
+async def save_user_profile(req: UserProfileRequest, request: Request,
                              user_id: str = Depends(get_current_user)):
-    # TODO: DB에 프로필 저장
-    print(f"[Facade] {user_id} 프로필 저장: {req.model_dump(exclude_none=True)}")
+    data = req.model_dump(exclude_none=True)
+    if data:
+        await request.app.state.postgres.execute({
+            "action": "update", "model": "UserProfile",
+            "filters": {"user_id": user_id},
+            "data": {k: v for k, v in {
+                "nickname": data.get("nickname"),
+            }.items() if v is not None},
+        })
     return {"status": "success"}
 
 @app.put("/api/user/style")
-async def save_user_style(req: UserStyleRequest,
+async def save_user_style(req: UserStyleRequest, request: Request,
                            user_id: str = Depends(get_current_user)):
-    # TODO: DB에 AI 스타일 저장
-    print(f"[Facade] {user_id} AI 스타일 저장: {req.model_dump(exclude_none=True)}")
+    data = req.model_dump(exclude_none=True)
+    if data:
+        await request.app.state.postgres.execute({
+            "action": "update", "model": "UserPreferences",
+            "filters": {"user_id": user_id},
+            "data": {"ui_settings": data},
+        })
     return {"status": "success"}
 
 @app.put("/api/user/travel")
-async def save_travel_preferences(req: UserTravelRequest,
+async def save_travel_preferences(req: UserTravelRequest, request: Request,
                                    user_id: str = Depends(get_current_user)):
-    # TODO: DB에 여행 스타일 저장
-    print(f"[Facade] {user_id} 여행 스타일 저장: {req.model_dump(exclude_none=True)}")
+    data = req.model_dump(exclude_none=True)
+    if data:
+        update = {}
+        if "styles" in data:     update["travel_style"]     = ",".join(data["styles"])
+        if "food_prefs" in data: update["preferred_food"]   = data["food_prefs"]
+        if "pace" in data:       update["schedule_density"] = data["pace"]
+        if data:
+            update["personalized_topics"] = data
+        await request.app.state.postgres.execute({
+            "action": "update", "model": "UserPreferences",
+            "filters": {"user_id": user_id},
+            "data": update,
+        })
     return {"status": "success"}
 
 @app.delete("/api/user/account")
 async def delete_account(request: Request, user_id: str = Depends(get_current_user)):
-    # TODO: DB에서 계정 및 관련 데이터 전체 삭제
-    print(f"[Facade] {user_id} 계정 삭제 요청 (mock)")
+    await request.app.state.postgres.execute({
+        "action": "update", "model": "User",
+        "filters": {"user_id": user_id},
+        "data": {"status": "deleted"},
+    })
     return {"status": "success", "message": "계정이 삭제되었습니다"}
-
 
 @app.get("/api/context")
 async def get_app_context():
     return {
         "today": date.today().isoformat(),
         "settings": {
-            "appGlassOpacity":         "20",
-            "leftSidebarCustomWidth":   300,
-            "rightSidebarCustomWidth":  300,
-            "theme":                   "default",
+            "appGlassOpacity":        "20",
+            "leftSidebarCustomWidth":  300,
+            "rightSidebarCustomWidth": 300,
+            "theme":                  "default",
         },
     }
 
 @app.get("/api/settings")
-async def get_settings(user_id: str = Depends(get_optional_user)):
+async def get_settings(request: Request, user_id: str = Depends(get_current_user)):
     return await Loader.get_settings(user_id)
 
 @app.post("/api/settings/update")
-async def update_settings(settings: Dict[str, str], user_id: str = Depends(get_optional_user)):
+async def update_settings(settings: Dict[str, str], request: Request,
+                           user_id: str = Depends(get_current_user)):
     return await Loader.update_settings(user_id, settings)
 
 @app.get("/api/help")
@@ -247,7 +347,6 @@ async def get_help_data():
 
 @app.post("/api/theme")
 async def save_theme_preference(req: ThemeRequest, user_id: str = Depends(get_optional_user)):
-    print(f"[Facade] {user_id} 테마 저장: {req.theme}")
     return {"status": "success"}
 
 @app.get("/api/weather")
@@ -265,40 +364,108 @@ async def get_weather():
 
 
 # ============================================================
-# 계획 API  →  Router
+# 여행(Trip) API  →  Loader  (로그인 필수)
 # ============================================================
 
+@app.get("/api/trips")
+async def get_trip_list(request: Request, user_id: str = Depends(get_current_user)):
+    trips = await Loader.get_trip_list(request.app.state.postgres, user_id)
+    return {"trips": trips}
+
+@app.post("/api/trips")
+async def create_trip(req: TripCreateRequest, request: Request,
+                       user_id: str = Depends(get_current_user)):
+    return await Loader.create_trip(request.app.state.postgres, user_id, req.model_dump(exclude_none=True))
+
+@app.put("/api/trips/{trip_id}")
+async def update_trip(trip_id: str, req: TripUpdateRequest, request: Request,
+                       user_id: str = Depends(get_current_user)):
+    return await Loader.update_trip(request.app.state.postgres, trip_id, user_id,
+                                     req.model_dump(exclude_none=True))
+
+@app.delete("/api/trips/{trip_id}")
+async def delete_trip(trip_id: str, request: Request,
+                       user_id: str = Depends(get_current_user)):
+    return await Loader.delete_trip(request.app.state.postgres, trip_id, user_id)
+
+# 하위 호환: /api/plans → /api/trips 리다이렉트 대신 동일 응답
 @app.get("/api/plans")
-async def get_plan_list(user_id: str = Depends(get_current_user)):
-    return await Router.get_plan_list(user_id)
+async def get_plan_list(request: Request, user_id: str = Depends(get_current_user)):
+    trips = await Loader.get_trip_list(request.app.state.postgres, user_id)
+    return {"trips": trips, "plans": trips}  # 하위 호환
 
 
 # ============================================================
-# 세션 관리 API  →  Router
+# 팀(Team) API  →  Loader  (로그인 필수)
+# ============================================================
+
+@app.get("/api/teams")
+async def get_team_list(request: Request, user_id: str = Depends(get_current_user)):
+    teams = await Loader.get_team_list(request.app.state.postgres, user_id)
+    return {"teams": teams}
+
+@app.post("/api/teams")
+async def create_team(req: TeamCreateRequest, request: Request,
+                       user_id: str = Depends(get_current_user)):
+    return await Loader.create_team(request.app.state.postgres, user_id, req.name)
+
+@app.get("/api/teams/{team_id}/sessions")
+async def get_team_sessions(team_id: str, request: Request,
+                             user_id: str = Depends(get_current_user)):
+    sessions = await Loader.get_team_sessions(request.app.state.postgres, team_id)
+    return {"sessions": sessions}
+
+
+# ============================================================
+# 세션 관리 API  →  Router  (로그인 필수)
 # ============================================================
 
 @app.get("/api/sessions")
-async def get_session_list(mode: str = "personal", plan_id: Optional[str] = None,
+async def get_session_list(request: Request,
+                            trip_id: Optional[str] = None,
+                            plan_id: Optional[str] = None,  # 하위 호환
+                            mode: str = "personal",
                             user_id: str = Depends(get_current_user)):
-    return await Router.get_session_list(mode, plan_id, user_id)
+    effective_trip = trip_id or plan_id
+    return await Router.get_session_list(effective_trip, user_id, request.app.state.postgres, mode)
 
 @app.post("/api/sessions")
-async def create_session(req: SessionCreateRequest, user_id: str = Depends(get_current_user)):
-    return await Router.create_session(req.first_message, req.mode, user_id, req.plan_id)
+async def create_session(req: SessionCreateRequest, request: Request,
+                          user_id: str = Depends(get_current_user)):
+    effective_trip = req.trip_id or req.plan_id
+    return await Router.create_session(
+        req.first_message, req.mode, user_id, effective_trip,
+        request.app.state.postgres, request.app.state.redis)
 
 @app.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str, user_id: str = Depends(get_current_user)):
-    return await Router.delete_session(session_id, user_id)
+async def delete_session(session_id: str, request: Request,
+                          user_id: str = Depends(get_current_user)):
+    return await Router.delete_session(session_id, user_id,
+                                        request.app.state.postgres, request.app.state.redis)
 
 @app.put("/api/sessions/{session_id}/mode")
 async def update_session_mode(session_id: str, req: SessionModeUpdateRequest,
-                               user_id: str = Depends(get_current_user)):
-    return await Router.update_session_mode(session_id, req.mode, user_id)
+                               request: Request, user_id: str = Depends(get_current_user)):
+    return await Router.update_session_mode(session_id, req.mode, user_id,
+                                             request.app.state.postgres,
+                                             request.app.state.redis)
+
+@app.get("/api/users/search")
+async def search_users(q: str, request: Request, user_id: str = Depends(get_current_user)):
+    """닉네임으로 사용자 검색."""
+    return await Loader.search_users(request.app.state.postgres, q)
+
+@app.get("/api/sessions/{session_id}/events")
+async def session_events(session_id: str, request: Request,
+                          user_id: str = Depends(get_current_user)):
+    """팀 채팅 실시간 이벤트 스트림 (SSE)."""
+    return await Router.subscribe_session_events(session_id, user_id)
 
 @app.post("/api/sessions/{session_id}/invite")
-async def invite_user(session_id: str, req: InviteRequest,
+async def invite_user(session_id: str, req: InviteRequest, request: Request,
                       user_id: str = Depends(get_current_user)):
-    return await Router.invite_user(session_id, req.user, user_id)
+    return await Router.invite_user(session_id, req.user, user_id,
+                                     request.app.state.postgres)
 
 @app.post("/api/sessions/{session_id}/share")
 async def share_chat(session_id: str, user_id: str = Depends(get_current_user)):
@@ -306,30 +473,42 @@ async def share_chat(session_id: str, user_id: str = Depends(get_current_user)):
 
 @app.put("/api/sessions/{session_id}/title")
 async def update_session_title(session_id: str, req: TitleUpdateRequest,
-                                user_id: str = Depends(get_current_user)):
-    return await Router.update_session_title(session_id, req.title, user_id)
+                                request: Request, user_id: str = Depends(get_current_user)):
+    return await Router.update_session_title(session_id, req.title, user_id,
+                                              request.app.state.postgres, request.app.state.redis)
 
 
 # ============================================================
-# 메시지 API  →  Router
+# 메시지 API  →  Router  (로그인 필수)
 # ============================================================
 
 @app.get("/api/sessions/{session_id}/history")
-async def get_chat_history(session_id: str, user_id: str = Depends(get_current_user)):
-    return await Router.get_chat_history(session_id)
+async def get_chat_history(session_id: str, request: Request,
+                            user_id: str = Depends(get_current_user)):
+    return await Router.get_chat_history(session_id, request.app.state.postgres)
 
 @app.post("/api/sessions/{session_id}/message")
-async def send_message(session_id: str, req: MessageRequest,
+async def send_message(session_id: str, req: MessageRequest, request: Request,
                        user_id: str = Depends(get_current_user)):
-    return await Router.send_message(session_id, req.message, user_id)
+    return await Router.send_message(session_id, req.message, user_id,
+                                      request.app.state.postgres, request.app.state.redis)
+
+@app.post("/api/sessions/{session_id}/team-message")
+async def send_team_message(session_id: str, req: MessageRequest, request: Request,
+                             user_id: str = Depends(get_current_user)):
+    """팀 채팅 전용 — AI 없이 저장 + SSE 브로드캐스트만."""
+    from .router.router import Router
+    return await Router._handle_team_message(session_id, user_id, req.message,
+                                              request.app.state.postgres)
 
 @app.get("/api/sessions/{session_id}/download")
-async def download_chat(session_id: str, user_id: str = Depends(get_current_user)):
-    return await Router.download_chat(session_id)
+async def download_chat(session_id: str, request: Request,
+                         user_id: str = Depends(get_current_user)):
+    return await Router.download_chat(session_id, request.app.state.postgres)
 
 
 # ============================================================
-# 파일 업로드  →  Router
+# 파일 업로드  →  Router  (로그인 필수)
 # ============================================================
 
 @app.post("/api/sessions/{session_id}/files")
@@ -339,70 +518,97 @@ async def upload_files(session_id: str, files: List[UploadFile] = File(...),
 
 
 # ============================================================
-# 지도 API  →  Router
+# 지도 API  →  Router  (로그인 필수)
 # ============================================================
 
 @app.post("/api/sessions/{session_id}/map/markers/add")
-async def add_map_marker(session_id: str, req: MapMarkerAddRequest,
+async def add_map_marker(session_id: str, req: MapMarkerAddRequest, request: Request,
                           user_id: str = Depends(get_current_user)):
     return await Router.add_map_marker(session_id, req.marker_id, req.lat, req.lng,
-                                        req.title or "", user_id)
+                                        req.title or "", user_id, request.app.state.redis)
 
 @app.delete("/api/sessions/{session_id}/map/markers/{marker_id}")
-async def delete_map_marker(session_id: str, marker_id: str,
+async def delete_map_marker(session_id: str, marker_id: str, request: Request,
                              user_id: str = Depends(get_current_user)):
-    return await Router.delete_map_marker(session_id, marker_id, user_id)
+    return await Router.delete_map_marker(session_id, marker_id, user_id,
+                                           request.app.state.redis)
 
 @app.post("/api/sessions/{session_id}/map/markers")
-async def save_map_markers(session_id: str, req: MapMarkersRequest,
+async def save_map_markers(session_id: str, req: MapMarkersRequest, request: Request,
                             user_id: str = Depends(get_current_user)):
-    return await Router.save_map_markers(session_id, req.markers, user_id)
+    return await Router.save_map_markers(session_id, req.markers, user_id,
+                                          request.app.state.redis)
 
 @app.get("/api/sessions/{session_id}/map/markers")
-async def get_map_markers(session_id: str, user_id: str = Depends(get_current_user)):
-    return await Router.get_map_markers(session_id, user_id)
+async def get_map_markers(session_id: str, request: Request,
+                           user_id: str = Depends(get_current_user)):
+    return await Router.get_map_markers(session_id, user_id, request.app.state.redis)
 
 
 # ============================================================
-# 여행 일정 API  →  Router
+# 여행 일정 API  →  Router  (로그인 필수)
 # ============================================================
 
 @app.put("/api/sessions/{session_id}/trip_range")
-async def save_trip_range(session_id: str, req: TripRangeRequest,
+async def save_trip_range(session_id: str, req: TripRangeRequest, request: Request,
                            user_id: str = Depends(get_current_user)):
-    return await Router.save_trip_range(session_id, req.ranges, user_id)
+    return await Router.save_trip_range(session_id, req.ranges, user_id,
+                                         request.app.state.redis)
 
 @app.get("/api/sessions/{session_id}/trip_range")
-async def get_trip_range(session_id: str, user_id: str = Depends(get_current_user)):
-    return await Router.get_trip_range(session_id, user_id)
+async def get_trip_range(session_id: str, request: Request,
+                          user_id: str = Depends(get_current_user)):
+    return await Router.get_trip_range(session_id, user_id, request.app.state.redis)
 
 
 # ============================================================
-# 메모 / 플래너 API  →  Router
+# 메모 / 플래너 API  →  Router  (로그인 필수)
 # ============================================================
 
 @app.put("/api/sessions/{session_id}/memo")
-async def save_memo(session_id: str, date: str, req: MemoRequest,
+async def save_memo(session_id: str, date: str, req: MemoRequest, request: Request,
                     user_id: str = Depends(get_current_user)):
-    return await Router.save_memo(session_id, date, req.memo, user_id)
+    return await Router.save_memo(session_id, date, req.memo, user_id, request.app.state.redis)
 
 @app.get("/api/sessions/{session_id}/memo")
-async def get_memo(session_id: str, date: str, user_id: str = Depends(get_current_user)):
-    return await Router.get_memo(session_id, date, user_id)
+async def get_memo(session_id: str, date: str, request: Request,
+                   user_id: str = Depends(get_current_user)):
+    return await Router.get_memo(session_id, date, user_id, request.app.state.redis)
 
 @app.put("/api/sessions/{session_id}/plan")
-async def save_plan(session_id: str, date: str, req: PlanRequest,
+async def save_plan(session_id: str, date: str, req: PlanRequest, request: Request,
                     user_id: str = Depends(get_current_user)):
-    return await Router.save_plan(session_id, date, req.plan, user_id)
+    return await Router.save_plan(session_id, date, req.plan, user_id, request.app.state.redis)
 
 @app.get("/api/sessions/{session_id}/plan")
-async def get_plan(session_id: str, date: str, user_id: str = Depends(get_current_user)):
-    return await Router.get_plan(session_id, date, user_id)
+async def get_plan(session_id: str, date: str, request: Request,
+                   user_id: str = Depends(get_current_user)):
+    return await Router.get_plan(session_id, date, user_id, request.app.state.redis)
 
 @app.get("/api/sessions/{session_id}/indicators")
-async def get_indicators(session_id: str, year: int, month: int,
+async def get_indicators(session_id: str, year: int, month: int, request: Request,
                           user_id: str = Depends(get_current_user)):
-    return await Router.get_indicators(session_id, year, month, user_id)
+    return await Router.get_indicators(session_id, year, month, user_id, request.app.state.redis)
+
+
+# ============================================================
+# 알림 API  →  Loader  (로그인 필수)
+# ============================================================
+
+@app.get("/api/notifications")
+async def get_notifications(request: Request, user_id: str = Depends(get_current_user)):
+    notifications = await Loader.get_notifications(request.app.state.postgres, user_id)
+    return {"notifications": notifications}
+
+@app.post("/api/notifications/{notification_id}/accept")
+async def accept_notification(notification_id: str, request: Request,
+                               user_id: str = Depends(get_current_user)):
+    return await Loader.accept_session_invite(request.app.state.postgres, notification_id, user_id)
+
+@app.post("/api/notifications/{notification_id}/dismiss")
+async def dismiss_notification(notification_id: str, request: Request,
+                                user_id: str = Depends(get_current_user)):
+    return await Loader.dismiss_notification(request.app.state.postgres, notification_id, user_id)
 
 
 # ============================================================

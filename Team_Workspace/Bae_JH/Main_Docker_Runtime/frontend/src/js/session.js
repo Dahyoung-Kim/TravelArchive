@@ -13,8 +13,11 @@ document.addEventListener('click', () => {
 });
 
 export const SessionManager = {
-  renderSidebarItem(title, sessionId, elements, state, isPrepend = true) {
-    const html = renderTemplate('session_item', { title, sessionId }, Icons);
+  _initSeq: 0,  // race condition guard: 마지막 init 호출만 DOM에 반영
+
+  renderSidebarItem(title, sessionId, elements, state, isPrepend = true, tripColor = null, userRole = 'master') {
+    const tripColorStyle = tripColor ? `background:${tripColor}` : '';
+    const html = renderTemplate('session_item', { title, sessionId, tripColorStyle }, Icons);
     const wrapper = createElementFromHTML(html);
 
     const newBtn = wrapper.querySelector('.sidebar-item');
@@ -35,6 +38,13 @@ export const SessionManager = {
       inviteBtn.style.display = 'flex';
       moveBtnText.textContent = '개인 플래너 이동';
       moveBtnIcon.innerHTML = Icons.Home;
+      // 마스터가 아니면 개인 전환 버튼 비활성화
+      if (userRole !== 'master') {
+        teamPlannerBtn.disabled = true;
+        teamPlannerBtn.title = '마스터만 전환할 수 있습니다';
+        teamPlannerBtn.style.opacity = '0.4';
+        teamPlannerBtn.style.cursor = 'not-allowed';
+      }
     } else {
       moveBtnText.textContent = '팀 플래너 이동';
       moveBtnIcon.innerHTML = Icons.Map;
@@ -80,8 +90,9 @@ export const SessionManager = {
 
     teamPlannerBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (teamPlannerBtn.disabled) return;
       dropdownMenu.classList.remove('show');
-      
+
       const targetMode = state.currentMode === 'personal' ? 'team' : 'personal';
 
       try {
@@ -96,49 +107,60 @@ export const SessionManager = {
     inviteBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       dropdownMenu.classList.remove('show');
-      
-      // 1. Render Modal from template
+
       const modalHtml = renderTemplate('user_search', {}, Icons);
       const modal = createElementFromHTML(modalHtml);
       document.body.appendChild(modal);
-
-      // 2. Show modal (trigger animation)
       setTimeout(() => modal.classList.add('show'), 10);
 
-      // 3. Close logic
-      const closeBtn = modal.querySelector('.modal-close-btn');
+      const closeBtn   = modal.querySelector('.modal-close-btn');
+      const input      = modal.querySelector('#userSearchInput');
+      const searchBtn  = modal.querySelector('.modal-action-btn');
+      const resultsDiv = modal.querySelector('.search-results-placeholder');
+
       const close = () => {
         modal.classList.remove('show');
         setTimeout(() => modal.remove(), 300);
       };
-      
       closeBtn.addEventListener('click', close);
-      modal.addEventListener('click', (ev) => {
-        if (ev.target === modal) close();
-      });
+      modal.addEventListener('click', ev => { if (ev.target === modal) close(); });
 
-      // 4. Input focus & Invite action
-      const input = modal.querySelector('#userSearchInput');
-      const actionBtn = modal.querySelector('.modal-action-btn');
-
-      actionBtn.addEventListener('click', async () => {
-        const searchVal = input.value.trim();
-        if (!searchVal) return;
-
-        try {
-          await BackendHooks.inviteUserToSession(sessionId, searchVal);
-          showToast(`${searchVal}님이 초대되었습니다.`);
-          close();
-        } catch (err) {
-          console.error("Failed to invite user:", err);
-          showToast(`초대에 실패했습니다.`);
+      const doSearch = async () => {
+        const q = input.value.trim();
+        if (!q) return;
+        resultsDiv.innerHTML = '<p style="color:var(--text-secondary,#888);font-size:13px;padding:8px 0">검색 중...</p>';
+        const users = await BackendHooks.searchUsers(q);
+        if (!users.length) {
+          resultsDiv.innerHTML = '<p style="color:var(--text-secondary,#888);font-size:13px;padding:8px 0">검색 결과가 없습니다.</p>';
+          return;
         }
-      });
+        resultsDiv.innerHTML = '';
+        for (const user of users) {
+          const item = document.createElement('div');
+          item.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 4px;border-bottom:1px solid var(--border-color,#eee)';
+          const nameSpan = document.createElement('span');
+          nameSpan.style.cssText = 'font-size:14px;color:var(--text-primary,#222)';
+          nameSpan.textContent = user.nickname || user.user_id;
+          const invBtn = document.createElement('button');
+          invBtn.style.cssText = 'padding:4px 12px;border-radius:6px;background:var(--accent,#2563eb);color:#fff;border:none;cursor:pointer;font-size:13px';
+          invBtn.textContent = '초대';
+          invBtn.addEventListener('click', async () => {
+            try {
+              await BackendHooks.inviteUserToSession(sessionId, user.user_id);
+              showToast(`${user.nickname || user.user_id}님이 초대되었습니다.`);
+              close();
+            } catch {
+              showToast('초대에 실패했습니다.');
+            }
+          });
+          item.appendChild(nameSpan);
+          item.appendChild(invBtn);
+          resultsDiv.appendChild(item);
+        }
+      };
 
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') actionBtn.click();
-      });
-
+      searchBtn.addEventListener('click', doSearch);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
       input.focus();
     });
 
@@ -173,14 +195,16 @@ export const SessionManager = {
   },
 
   async init(elements, state) {
+    const seq    = ++this._initSeq;
     elements.sidebarList.innerHTML = '';
-    const mode    = state.currentMode    || 'personal';
-    const planId  = state.currentPlanId  || null;
+    const mode   = state.currentMode   || 'personal';
+    const tripId = state.currentTripId || null;
 
     try {
-      const sessions = await BackendHooks.fetchSessionList(mode, planId);
+      const sessions = await BackendHooks.fetchSessionList(mode, tripId);
+      if (seq !== this._initSeq) return; // 더 최신 init이 실행됐으면 결과 버림
       for (const session of sessions) {
-        this.renderSidebarItem(session.title, session.id, elements, state, false);
+        this.renderSidebarItem(session.title, session.session_id || session.id, elements, state, false, session.trip_color, session.user_role || 'master');
       }
     } catch (error) { console.error(error); }
   }

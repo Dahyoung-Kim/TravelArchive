@@ -12,8 +12,37 @@ import { ScheduleManager } from './js/schedule.js';
 import { router } from './js/router.js';
 import { ThemeManager } from './js/theme.js';
 import { initRightSidebarMarkerPanel } from './js/components/map/map-right-sidebar-marker-panel.js';
+import { NotificationManager } from './js/notification.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // ── OAuth 콜백: 카카오 로그인 후 /?access_token=...&refresh_token=... 처리 ──
+  {
+    const urlParams = new URLSearchParams(window.location.search);
+    const oauthAccess  = urlParams.get('access_token');
+    const oauthRefresh = urlParams.get('refresh_token');
+    if (oauthAccess && oauthRefresh) {
+      TokenManager.setTokens(oauthAccess, oauthRefresh);
+      TokenManager.setUserInfo({
+        userId:   urlParams.get('user_id')   || '',
+        userType: urlParams.get('user_type') || 'KKO',
+        nickname: decodeURIComponent(urlParams.get('nickname') || ''),
+        email:    decodeURIComponent(urlParams.get('email')    || ''),
+      });
+      // URL 파라미터 제거 (히스토리 깔끔하게)
+      window.history.replaceState({}, '', window.location.pathname + (window.location.hash || '#/'));
+    }
+  }
+
+  // 비로그인 임시 세션 ID (sessionStorage에 브라우저 탭 단위로 보관)
+  const _getTempSessionId = () => {
+    let id = sessionStorage.getItem('ta_temp_session_id');
+    if (!id) {
+      id = 'tmp_' + crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+      sessionStorage.setItem('ta_temp_session_id', id);
+    }
+    return id;
+  };
+
   // 1. Elements Collection
   const elements = {
     mainContent: document.getElementById('mainContent'),
@@ -67,6 +96,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     accountBtn: document.getElementById('accountBtn'),
     helpBtn: document.getElementById('helpBtn'),
     themeBtn: document.getElementById('themeBtn'),
+    notifBtn: document.getElementById('notifBtn'),
+    notifBadge: document.getElementById('notifBadge'),
     themePopup: document.getElementById('themePopup'),
     themeSwatches: document.querySelectorAll('.theme-swatch'),
     weatherLayer: document.getElementById('weatherLayer'),
@@ -76,30 +107,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     planFilterTrigger: document.getElementById('planFilterTrigger'),
     planFilterLabel: document.getElementById('planFilterLabel'),
     planFilterMenu: document.getElementById('planFilterMenu'),
+    tempChatBtn: document.getElementById('tempChatBtn'),
   };
 
   const state = {
     currentSessionId: null,
     isReceiving: false,
     currentMode: 'personal', // 'personal' or 'team'
-    currentPlanId: null,     // null = 전체, 'plan_xxx' = 특정 계획
+    currentTripId: null,     // null = 전체, 'none' = 기타, 'trip_xxx' = 특정 여행
+    isTempMode: false,       // 임시 채팅 모드 (로그인 후 임시 채팅 사용 시)
   };
 
-  // 홈 대시보드 "+" 카드 클릭 → 목적지 입력 후 세션 생성 + 첫 메시지 자동 전송
-  elements._onNewSession = async (destination) => {
+  // 홈 대시보드 "+" 카드 클릭 → 첫 메시지 입력 후 세션 생성 + 자동 전송
+  elements._onNewSession = async (firstMsg) => {
     if (state.isReceiving) return;
     try {
-      const title = destination ? `${destination} 여행` : '새 여행 계획';
+      const title = firstMsg || '새 대화';
+      const effectiveTripId = state.currentTripId === 'none' ? null : state.currentTripId;
       const session = await BackendHooks.createSession(
-        title, state.currentMode, state.currentPlanId
+        title, state.currentMode, effectiveTripId
       );
-      SessionManager.renderSidebarItem(session.title, session.id, elements, state, true);
-      window.location.hash = `#/chat/${session.id}`;
+      const sid = session.id || session.session_id;
+      SessionManager.renderSidebarItem(session.title, sid, elements, state, true, session.trip_color);
+      window.location.hash = `#/chat/${sid}`;
 
-      // 목적지가 있으면 라우터·채팅 뷰 전환 완료 후 첫 메시지 자동 전송
-      if (destination) {
+      if (firstMsg) {
         setTimeout(() => {
-          elements.chatInput.value = destination;
+          elements.chatInput.value = firstMsg;
           adjustTextareaHeight(elements.chatInput, elements.chatBox);
           ChatManager.handleSend(state, elements);
         }, 350);
@@ -112,49 +146,87 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 사이드바 세션 목록 재조회
   elements._refreshSessions = () => SessionManager.init(elements, state);
 
-  // ── 계획 드롭다운 ─────────────────────────────────────────
-  // plans 상태를 외부로 빼서 이벤트 핸들러가 항상 최신 목록을 참조
-  let _planList = [];
-  let _planDropdownInited = false;
+  // 여행 카드 클릭 → 현재 여행 필터 변경 + 세션 목록 갱신
+  elements._onTripSelect = (tripId, tripTitle) => {
+    state.currentTripId = tripId || null;
+    if (elements.planFilterLabel) {
+      if (!tripId) elements.planFilterLabel.textContent = '전체';
+      else if (tripId === 'none') elements.planFilterLabel.textContent = '기타';
+      else elements.planFilterLabel.textContent = tripTitle || '여행';
+    }
+    _renderTripMenu();
+    SessionManager.init(elements, state);
+  };
 
-  function _renderPlanMenu() {
+  // router.js가 호출할 수 있도록 elements에 임시채팅 탈출 함수 노출 (아래에서 정의 후 덮어씀)
+  elements._exitTempMode = () => {};
+
+  // 알림 수락 후 팀 플래너로 전환하는 헬퍼 (notification.js에서 호출)
+  elements._switchToTeamMode = () => {
+    if (state.currentMode === 'team') return;
+    state.currentMode = 'team';
+    if (elements.mainTeamPlannerBtn) {
+      elements.mainTeamPlannerBtn.innerHTML = `
+        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+        개인 플래너
+      `;
+    }
+    SessionManager.init(elements, state);
+  };
+
+  // ── 여행 필터 드롭다운 ────────────────────────────────────
+  // _tripList를 외부로 빼서 이벤트 핸들러가 항상 최신 목록을 참조
+  let _tripList = [];
+  let _tripDropdownInited = false;
+
+  function _renderTripMenu() {
     const { planFilterLabel, planFilterMenu } = elements;
     if (!planFilterMenu) return;
     planFilterMenu.innerHTML = '';
 
-    const allItem = document.createElement('div');
-    allItem.className = 'plan-filter-item' + (state.currentPlanId === null ? ' active' : '');
-    allItem.dataset.planId = '';
-    allItem.textContent = '전체';
-    planFilterMenu.appendChild(allItem);
-
-    for (const plan of _planList) {
+    const makeItem = (label, dataId, color, isActive) => {
       const item = document.createElement('div');
-      item.className = 'plan-filter-item' + (state.currentPlanId === plan.id ? ' active' : '');
-      item.dataset.planId = plan.id;
-      item.textContent = plan.title || '이름 없는 계획';
-      planFilterMenu.appendChild(item);
+      item.className = 'plan-filter-item' + (isActive ? ' active' : '');
+      item.dataset.tripId = dataId;
+      if (color) {
+        const swatch = document.createElement('span');
+        swatch.className = 'plan-filter-swatch';
+        swatch.style.background = color;
+        item.appendChild(swatch);
+      }
+      const label_ = document.createElement('span');
+      label_.textContent = label;
+      item.appendChild(label_);
+      return item;
+    };
+
+    planFilterMenu.appendChild(makeItem('전체', '', null, state.currentTripId === null));
+
+    for (const trip of _tripList) {
+      planFilterMenu.appendChild(
+        makeItem(trip.title || '이름 없는 여행', trip.trip_id, trip.color, state.currentTripId === trip.trip_id)
+      );
     }
 
-    // 로그아웃 상태면 레이블도 초기화
+    planFilterMenu.appendChild(makeItem('기타', 'none', null, state.currentTripId === 'none'));
+
     if (!TokenManager.isLoggedIn()) {
       planFilterLabel.textContent = '전체';
     }
   }
 
-  async function initPlanDropdown() {
+  async function initTripDropdown() {
     const { planFilterTrigger, planFilterLabel, planFilterMenu } = elements;
     if (!planFilterTrigger) return;
 
     try {
-      _planList = TokenManager.isLoggedIn() ? await BackendHooks.fetchPlanList() : [];
-    } catch (e) { _planList = []; }
+      _tripList = TokenManager.isLoggedIn() ? await BackendHooks.fetchTripList() : [];
+    } catch (e) { _tripList = []; }
 
-    _renderPlanMenu();
+    _renderTripMenu();
 
-    // 이벤트 리스너는 최초 1회만 등록 (중복 방지)
-    if (_planDropdownInited) return;
-    _planDropdownInited = true;
+    if (_tripDropdownInited) return;
+    _tripDropdownInited = true;
 
     planFilterTrigger.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -165,27 +237,78 @@ document.addEventListener('DOMContentLoaded', async () => {
       const item = e.target.closest('.plan-filter-item');
       if (!item) return;
 
-      const selectedId = item.dataset.planId || null;
-      state.currentPlanId = selectedId;
-      planFilterLabel.textContent = selectedId
-        ? (_planList.find(p => p.id === selectedId)?.title || '계획')
-        : '전체';
+      const selectedId = item.dataset.tripId || null;
+      state.currentTripId = selectedId === '' ? null : selectedId;
+
+      if (selectedId === '') {
+        planFilterLabel.textContent = '전체';
+      } else if (selectedId === 'none') {
+        planFilterLabel.textContent = '기타';
+      } else {
+        planFilterLabel.textContent = _tripList.find(t => t.trip_id === selectedId)?.title || '여행';
+      }
 
       planFilterMenu.classList.remove('open');
-      _renderPlanMenu();
+      _renderTripMenu();
       SessionManager.init(elements, state);
     });
 
     document.addEventListener('click', () => planFilterMenu.classList.remove('open'));
   }
 
-  elements._refreshPlanDropdown = initPlanDropdown;
+  elements._refreshTripDropdown = initTripDropdown;
+
+  // ── 비로그인 Auth Gate ──────────────────────────────────────
+  function applyAuthGate(isLoggedIn) {
+    const gatedEls = [
+      elements.newChatBtn,
+      elements.mainTeamPlannerBtn,
+      elements.tabCalendar,
+      elements.planFilterTrigger,
+    ];
+    gatedEls.forEach(el => {
+      if (!el) return;
+      el.style.opacity       = isLoggedIn ? '' : '0.35';
+      el.style.pointerEvents = isLoggedIn ? '' : 'none';
+      el.title = isLoggedIn ? '' : '로그인 후 이용 가능합니다';
+    });
+
+    // 임시 채팅 버튼: 로그인 시에만 표시
+    if (elements.tempChatBtn) {
+      elements.tempChatBtn.style.display = isLoggedIn ? '' : 'none';
+    }
+
+    if (elements.sidebarList) {
+      if (!isLoggedIn) {
+        elements.sidebarList.innerHTML = `
+          <div style="padding:24px 16px; text-align:center; color:var(--text-secondary,#888); font-size:13px; line-height:1.6;">
+            로그인 후<br>세션 목록을 이용할 수 있습니다.
+          </div>`;
+      }
+    }
+  }
+
+  // ── 로그인 이벤트: account.js → script.js 브리지 ────────
+  document.addEventListener('ta:login', async () => {
+    applyAuthGate(true);
+    state.isTempMode = false;
+    await initTripDropdown();
+    await SessionManager.init(elements, state);
+    NotificationManager.startPolling(state, elements);
+  });
 
   // ── 로그아웃 이벤트: account.js → script.js 브리지 ────────
   document.addEventListener('ta:logout', () => {
-    // 상태 초기화
+    // SSE 연결 종료
+    if (state._sseConnection) {
+      state._sseConnection.close();
+      state._sseConnection = null;
+    }
+    NotificationManager.stopPolling();
+
     state.currentSessionId = null;
-    state.currentPlanId    = null;
+    state.currentTripId    = null;
+    state.isTempMode       = false;
 
     // 사이드바 세션 목록 지우기
     elements.sidebarList.innerHTML = '';
@@ -197,9 +320,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     elements.heroSection?.classList.remove('dashboard-active');
 
-    // plan 드롭다운 갱신 (로그아웃 상태 → 빈 목록)
-    _planList = [];
-    _renderPlanMenu();
+    // planFilter 표시 복원 (임시 채팅 모드로 숨겨졌을 수 있음)
+    if (elements.planFilter) elements.planFilter.style.display = '';
+
+    // 여행 드롭다운 초기화 (로그아웃 상태 → 빈 목록)
+    _tripList = [];
+    _renderTripMenu();
+
+    // Auth Gate 적용
+    applyAuthGate(false);
 
     // 홈으로 이동 (이미 홈이면 router 강제 호출)
     if (!window.location.hash || window.location.hash === '#/') {
@@ -244,7 +373,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 3. Parallel Async Initialization (Don't block UI event listeners)
   (async () => {
     try {
-      await initPlanDropdown();
+      await initTripDropdown();
       await SessionManager.init(elements, state);
       await CalendarManager.init(todayDate);
       await CalendarManager.render(elements.calendarContent);
@@ -254,6 +383,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       SidebarManager.initResizers(elements, config);
       SidebarManager.initFolding(elements);
       ThemeManager.init(elements);
+      NotificationManager.init(elements, state);
+      if (TokenManager.isLoggedIn()) {
+        NotificationManager.startPolling(state, elements);
+      }
 
       // 마커 정보 패널 초기화 (map iframe과 postMessage 통신)
       const mapContainerEl = document.getElementById('kakaoMapContainer');
@@ -266,8 +399,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       router(state, elements);
+      applyAuthGate(TokenManager.isLoggedIn());
     } catch (e) {
       console.warn("Some async components failed to load, UI will still function", e);
+      applyAuthGate(TokenManager.isLoggedIn());
     }
   })();
 
@@ -326,11 +461,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     }, 310);
   });
 
-  // Navigation & Chat
-  [elements.homeBtn, elements.newChatBtn].forEach(btn => btn.addEventListener('click', () => {
+  // Navigation
+  elements.homeBtn?.addEventListener('click', () => {
     if (SidebarManager.isMobile()) SidebarManager.closeSidebar(elements);
+    if (state.isTempMode) _exitTempMode();
     if (!state.isReceiving) window.location.hash = '#/';
-  }));
+  });
+
+  elements.newChatBtn?.addEventListener('click', () => {
+    if (SidebarManager.isMobile()) SidebarManager.closeSidebar(elements);
+    if (state.isTempMode) _exitTempMode();
+    if (!state.isReceiving) elements._onNewSession(null);
+  });
 
   elements.mainTeamPlannerBtn?.addEventListener('click', () => {
     if (SidebarManager.isMobile()) SidebarManager.closeSidebar(elements);
@@ -351,8 +493,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       `;
     }
 
-    // Refresh session list
+    // Refresh session list + re-evaluate SSE for current chat
     SessionManager.init(elements, state);
+    router(state, elements);
     showToast(`${state.currentMode === 'team' ? '팀' : '개인'} 플래너로 전환되었습니다.`);
     setTimeout(window.updatePlaceholder, 310);
   });
@@ -364,8 +507,76 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  elements.sendBtn.addEventListener('click', () => ChatManager.handleSend(state, elements));
-  elements.chatInput.addEventListener('keydown', (e) => (e.key === 'Enter' && !e.shiftKey && !e.isComposing) && (e.preventDefault(), ChatManager.handleSend(state, elements)));
+  // ── 임시 채팅 모드 진입/탈출 헬퍼 ─────────────────────────
+  const _enterTempMode = () => {
+    state.isTempMode = true;
+    state.currentSessionId = null;
+    if (elements.chatHistory) elements.chatHistory.innerHTML = '';
+    if (elements.planFilter) elements.planFilter.style.display = 'none';
+    if (elements.sidebarList) {
+      elements.sidebarList.innerHTML = `
+        <div style="padding:24px 16px; text-align:center; color:var(--text-secondary,#888); font-size:13px; line-height:1.8;">
+          임시 채팅 모드입니다.<br>대화 내용은 저장되지 않습니다.
+        </div>`;
+    }
+    // hashchange가 발생하지 않을 수 있으므로 라우터를 직접 호출
+    router(state, elements);
+  };
+
+  const _exitTempMode = () => {
+    if (!state.isTempMode) return;
+    state.isTempMode = false;
+    if (elements.planFilter) elements.planFilter.style.display = '';
+    // 라우터 직접 호출 → 홈 대시보드 복원 + 세션 목록 갱신
+    router(state, elements);
+  };
+  // router.js에서 접근 가능하도록 연결
+  elements._exitTempMode = _exitTempMode;
+
+  // 임시 채팅 버튼: 로그인 사용자가 저장 없는 채팅 시작
+  elements.tempChatBtn?.addEventListener('click', () => {
+    if (SidebarManager.isMobile()) SidebarManager.closeSidebar(elements);
+    _enterTempMode();
+    window.location.hash = '#/';
+  });
+
+  // 전송 핸들러: 비로그인 또는 임시 채팅 모드 시 임시 챗봇, 로그인 시 정상 세션 사용
+  const _handleSendOrTemp = () => {
+    if (TokenManager.isLoggedIn() && !state.isTempMode) {
+      ChatManager.handleSend(state, elements);
+    } else {
+      const message = elements.chatInput?.value?.trim();
+      if (!message || state.isReceiving) return;
+
+      const tempId = _getTempSessionId();
+      state.isReceiving = true;
+      elements.sendBtn.disabled = true;
+
+      // 사용자 메시지 버블 추가
+      const userBubble = document.createElement('div');
+      userBubble.className = 'chat-message user-message';
+      userBubble.textContent = message;
+      elements.chatHistory?.appendChild(userBubble);
+
+      // 봇 응답 버블 추가
+      const botBubble = document.createElement('div');
+      botBubble.className = 'chat-message bot-message';
+      botBubble.textContent = '...';
+      elements.chatHistory?.appendChild(botBubble);
+      elements.chatHistory?.scrollTo({ top: elements.chatHistory.scrollHeight, behavior: 'smooth' });
+
+      elements.chatInput.value = '';
+
+      BackendHooks.sendTempMessage(
+        tempId, message,
+        (text) => { botBubble.textContent = text; elements.chatHistory?.scrollTo({ top: elements.chatHistory.scrollHeight }); },
+        () => { state.isReceiving = false; elements.sendBtn.disabled = false; },
+      );
+    }
+  };
+
+  elements.sendBtn.addEventListener('click', _handleSendOrTemp);
+  elements.chatInput.addEventListener('keydown', (e) => (e.key === 'Enter' && !e.shiftKey && !e.isComposing) && (e.preventDefault(), _handleSendOrTemp()));
   elements.chatInput.addEventListener('input', () => adjustTextareaHeight(elements.chatInput, elements.chatBox));
   elements.expandBtn.addEventListener('click', () => {
     const input = elements.chatInput;
@@ -499,6 +710,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       target.classList.remove('scrollbar-active');
     }, SCROLLBAR_HIDE_DELAY));
   }, true); // capture phase로 버블링 없는 scroll도 감지
+
+  // 탭/창 닫기 전 Redis → Postgres 플러시
+  window.addEventListener('beforeunload', () => {
+    if (TokenManager.isLoggedIn()) BackendHooks.flushSessions();
+  });
 
   window.updatePlaceholder();
   adjustTextareaHeight(elements.chatInput, elements.chatBox);

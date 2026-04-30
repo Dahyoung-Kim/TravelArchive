@@ -1,40 +1,142 @@
 """
-OAuth SNS 로그인 목업 (Phase 7 이후 구현)
-각 제공자별로 실제 API 연동, 토큰 교환 등을 구현할 예정.
+카카오 OAuth 로그인 서비스.
+provider: kakao 전용 (naver/google 미지원).
+
+흐름:
+  1. GET /api/auth/kakao → get_kakao_auth_url() → 카카오 인가 페이지로 리다이렉트
+  2. 카카오 → GET /api/auth/kakao/callback?code=...
+  3. kakao_callback() → code 교환 → 사용자 정보 조회 → DB 신규/기존 처리 → JWT 발급
 """
+import os
+import uuid
+from datetime import datetime, timezone
+from urllib.parse import urlencode
 
-async def kakao_login(code: str) -> dict:
+import aiohttp
+from fastapi import HTTPException
+
+from module.node.memory.postgres_manager import PostgresManager
+from module.node.memory.redis_manager import RedisManager
+from .jwt_utils import create_access_token, create_refresh_token
+
+KAKAO_CLIENT_ID     = os.getenv("KAKAO_CLIENT_ID", "")
+KAKAO_CLIENT_SECRET = os.getenv("KAKAO_CLIENT_SECRET", "")  # 보안 강화 시 사용 (선택)
+KAKAO_REDIRECT_URI  = os.getenv("KAKAO_REDIRECT_URI", "")
+
+TTL_MEMBER = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7")) * 24 * 3600
+
+
+def get_kakao_auth_url() -> str:
+    """프론트엔드가 리다이렉트할 카카오 인가 URL 반환."""
+    if not KAKAO_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="카카오 로그인이 설정되지 않았습니다 (KAKAO_CLIENT_ID 누락)")
+    params = {
+        "client_id":     KAKAO_CLIENT_ID,
+        "redirect_uri":  KAKAO_REDIRECT_URI,
+        "response_type": "code",
+    }
+    return "https://kauth.kakao.com/oauth/authorize?" + urlencode(params)
+
+
+async def _exchange_code(code: str) -> str:
+    """authorization code → 카카오 access_token 교환."""
+    body = {
+        "grant_type":   "authorization_code",
+        "client_id":    KAKAO_CLIENT_ID,
+        "redirect_uri": KAKAO_REDIRECT_URI,
+        "code":         code,
+    }
+    if KAKAO_CLIENT_SECRET:
+        body["client_secret"] = KAKAO_CLIENT_SECRET
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post("https://kauth.kakao.com/oauth/token", data=body) as resp:
+            if resp.status != 200:
+                text = await resp.text()
+                raise HTTPException(status_code=502, detail=f"카카오 토큰 교환 실패: {text[:200]}")
+            data = await resp.json()
+    return data["access_token"]
+
+
+async def _get_user_info(kakao_access_token: str) -> dict:
+    """카카오 access_token → 사용자 정보 조회."""
+    headers = {"Authorization": f"Bearer {kakao_access_token}"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get("https://kapi.kakao.com/v2/user/me", headers=headers) as resp:
+            if resp.status != 200:
+                raise HTTPException(status_code=502, detail="카카오 사용자 정보 조회 실패")
+            return await resp.json()
+
+
+async def kakao_callback(
+    code: str,
+    postgres: PostgresManager,
+    redis: RedisManager,
+) -> dict:
     """
-    카카오 OAuth 콜백 처리 (구현 예정)
-
-    흐름:
-    1. authorization code → access_token 교환
-    2. access_token으로 사용자 정보 조회 (provider_sub)
-    3. user_oauth 테이블에서 (KKO, provider_sub) 검색
-    4. 기존: 로그인, 신규: 회원가입 후 로그인
+    카카오 콜백 처리 → 서비스 JWT 발급.
+    - 신규 유저: KKO 계정 생성 (users + user_oauth + user_profile + user_preferences)
+    - 기존 유저: user_oauth에서 user_id 조회 후 로그인
     """
-    pass
+    kakao_token  = await _exchange_code(code)
+    info         = await _get_user_info(kakao_token)
 
+    provider_uid    = str(info["id"])
+    kakao_account   = info.get("kakao_account", {})
+    kakao_profile   = kakao_account.get("profile", {})
+    nickname        = kakao_profile.get("nickname", "")
+    profile_img_url = kakao_profile.get("profile_image_url", "")
+    email           = kakao_account.get("email")  # 이메일 제공 동의 시에만 존재
 
-async def naver_login(code: str) -> dict:
-    """
-    네이버 OAuth 콜백 처리 (구현 예정)
+    # 기존 유저 확인
+    oauth_result = await postgres.execute({
+        "action":  "read",
+        "model":   "UserOAuth",
+        "filters": {"provider": "kakao", "provider_uid": provider_uid},
+    })
 
-    흐름: kakao_login과 동일 (provider만 NVR로 다름)
-    """
-    pass
+    now = datetime.now(tz=timezone.utc)
 
+    if oauth_result.get("status") == "success" and oauth_result.get("data"):
+        user_id = oauth_result["data"][0]["user_id"]
+    else:
+        # 신규 KKO 유저 생성
+        user_id  = "KKO:" + str(uuid.uuid4())[:16]
+        oauth_id = "oauth_" + str(uuid.uuid4())[:16]
 
-async def google_login(id_token: str) -> dict:
-    """
-    구글 OAuth 콜백 처리 (구현 예정)
+        for payload in [
+            {"action": "create", "model": "User",
+             "data": {"user_id": user_id, "user_type": "KKO", "status": "active", "created_at": now}},
+            {"action": "create", "model": "UserOAuth",
+             "data": {"oauth_id": oauth_id, "user_id": user_id,
+                      "provider": "kakao", "provider_uid": provider_uid, "created_at": now}},
+            {"action": "create", "model": "UserProfile",
+             "data": {"user_id": user_id, "email": email, "nickname": nickname,
+                      "profile_img_url": profile_img_url, "updated_at": now}},
+            {"action": "create", "model": "UserPreferences",
+             "data": {"user_id": user_id, "updated_at": now}},
+        ]:
+            result = await postgres.execute(payload)
+            if result.get("status") != "success":
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"KKO 계정 생성 실패 ({payload['model']}): {result.get('reason')}",
+                )
 
-    Google은 id_token을 직접 검증하는 방식 사용.
+    # JWT 발급
+    access_token       = create_access_token(user_id)
+    refresh_token, jti = create_refresh_token(user_id)
 
-    흐름:
-    1. id_token → JWT 검증 (Google 공개키로)
-    2. id_token payload에서 sub (provider_sub) 추출
-    3. user_oauth 테이블에서 (GGL, provider_sub) 검색
-    4. 기존: 로그인, 신규: 회원가입 후 로그인
-    """
-    pass
+    await redis.execute({
+        "action": "set", "key": f"auth:refresh:{jti}", "value": user_id, "ttl": TTL_MEMBER,
+    })
+
+    return {
+        "access_token":  access_token,
+        "refresh_token": refresh_token,
+        "user_id":       user_id,
+        "type":          "KKO",
+        "nickname":      nickname,
+        "email":         email,
+        "status":        "success",
+    }

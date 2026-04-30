@@ -30,7 +30,6 @@ export function switchView(viewName, elements) {
     mapToggleBtn
   } = elements;
 
-  // 모두 초기화
   heroSection.style.display = 'none';
   chatHistory.style.display = 'none';
   chatWrap.style.display = 'none';
@@ -68,6 +67,15 @@ export async function router(state, elements) {
 
   if (path.startsWith('#/chat/')) {
     const ssid = path.replace('#/chat/', '');
+
+    // Close any existing SSE connection before switching sessions
+    if (state._sseConnection) {
+      state._sseConnection.close();
+      state._sseConnection = null;
+    }
+
+    let actualSessionMode = state.currentMode;
+
     if (state.currentSessionId !== ssid) {
       switchView('chat', elements);
       chatHistory.innerHTML = '';
@@ -79,10 +87,21 @@ export async function router(state, elements) {
       SidebarManager.initScheduleRows(elements);
 
       try {
-        const historyData = await BackendHooks.fetchChatHistory(ssid);
+        const result = await BackendHooks.fetchChatHistory(ssid);
+        actualSessionMode = result.mode || state.currentMode;
+        state.currentSessionMode = actualSessionMode;
         removeLoadingIndicator(loadingId);
-        for (const msg of historyData) {
-          appendMessage(chatHistory, msg.content, msg.role);
+        const myId = TokenManager.getUserId();
+        for (const msg of result.messages) {
+          let role;
+          if (msg.sender_id && msg.sender_id === myId) {
+            role = 'user';
+          } else if (msg.sender_id && msg.sender_id !== myId) {
+            role = 'bot';
+          } else {
+            role = msg.role;
+          }
+          appendMessage(chatHistory, msg.content, role);
         }
       } catch (e) {
         console.error(e);
@@ -90,12 +109,38 @@ export async function router(state, elements) {
       }
     } else {
       switchView('chat', elements);
+      // 같은 세션 재진입 시에도 저장된 모드 사용
+      if (state.currentSessionMode) actualSessionMode = state.currentSessionMode;
     }
+
+    // SSE는 실제 세션 모드 기준으로 시작 (사이드바 탭 무관)
+    if (actualSessionMode === 'team') {
+      const myId = TokenManager.getUserId();
+      state._sseConnection = BackendHooks.subscribeToSessionEvents(
+        ssid,
+        (event) => {
+          if (event.type === 'message' && event.sender_id !== myId) {
+            appendMessage(chatHistory, event.content, 'bot');
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+          }
+        },
+        (err) => console.error('[SSE]', err)
+      );
+    }
+
     return;
   }
 
   const page = PAGES[path] || PAGES['#/'];
+
+  // Close SSE when navigating away from chat
+  if (state._sseConnection) {
+    state._sseConnection.close();
+    state._sseConnection = null;
+  }
+
   state.currentSessionId = null;
+  state.currentSessionMode = null;
 
   CalendarManager.loadTripRange(null);
   SidebarManager.initMemoRows(elements);
@@ -107,12 +152,32 @@ export async function router(state, elements) {
     adjustTextareaHeight(chatInput, chatBox);
     switchView('home', elements);
 
-    // homeDashboard는 heroSection 내부에 있으므로 hero와 함께 show/hide됨
+    if (state.isTempMode) {
+      // 임시 채팅 모드: hereTempChat 헤더 + chatHistory 동시 표시
+      document.getElementById('heroNormal')?.setAttribute('style', 'display:none');
+      document.getElementById('hereTempChat')?.removeAttribute('style');
+      if (elements.homeDashboard) {
+        elements.homeDashboard.style.display = 'none';
+        elements.heroSection?.classList.remove('dashboard-active');
+      }
+      // switchView('home')이 chatHistory를 숨기므로 다시 열어줌
+      chatHistory.style.display = 'flex';
+      const exitBtn = document.getElementById('exitTempChatBtn');
+      if (exitBtn) {
+        exitBtn.onclick = () => { elements._exitTempMode?.(); };
+      }
+      return;
+    }
+
+    // 일반 홈 — heroNormal 보장
+    document.getElementById('heroNormal')?.removeAttribute('style');
+    document.getElementById('hereTempChat')?.setAttribute('style', 'display:none');
+
     if (elements.homeDashboard) {
       if (TokenManager.isLoggedIn()) {
         elements.homeDashboard.style.display = 'block';
         elements.heroSection?.classList.add('dashboard-active');
-        HomeManager.render(elements.homeDashboard, elements._onNewSession || (() => {}));
+        HomeManager.render(elements.homeDashboard, elements._onNewSession || (() => {}), elements._onTripSelect);
         elements._refreshSessions?.();
       } else {
         elements.homeDashboard.style.display = 'none';

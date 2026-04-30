@@ -3,12 +3,9 @@
  * 계정 탭 렌더링.
  *
  * [비로그인]
- *   → 로그인 폼 (이메일·비밀번호, SNS, 게스트, 회원가입)
+ *   → 로그인 폼 (이메일·비밀번호, 카카오 로그인, 회원가입)
  *
- * [로그인 후 — 게스트]
- *   → 프로필 헤더 + 개인 설정 (프로필·스타일·여행스타일) + 로그아웃·회원가입
- *
- * [로그인 후 — 정회원]
+ * [로그인 후 — 이메일 회원(MEM) / 카카오 회원(KKO)]
  *   → 프로필 헤더 + 개인 설정 (프로필·스타일·여행스타일) + 계정 관리
  */
 
@@ -253,18 +250,18 @@ function buildTravelStyleHTML() {
   `;
 }
 
-function buildAccountMgmtHTML() {
+function buildAccountMgmtHTML(userType) {
+  const isKKO = userType === 'KKO';
   return `
     <div class="card-base">
       <label class="label-base">계정 관리</label>
 
       <div class="form-row">
-        <label class="form-label">다른 SNS 연동</label>
-        <div class="social-link-grid">
-          <button class="btn-base btn-social btn-google" id="linkGoogleBtn">Google</button>
-          <button class="btn-base btn-social btn-kakao" id="linkKakaoBtn">Kakao</button>
-          <button class="btn-base btn-social btn-naver" id="linkNaverBtn">Naver</button>
-        </div>
+        <label class="form-label">카카오 연동</label>
+        ${isKKO
+          ? `<p class="form-hint" style="margin:4px 0;">카카오 계정으로 로그인 중입니다.</p>`
+          : `<button class="btn-base btn-social btn-kakao" id="linkKakaoBtn">카카오 연동하기</button>`
+        }
       </div>
 
       <div class="settings-danger-zone">
@@ -496,15 +493,8 @@ function bindTravelStyleEvents(container) {
 }
 
 function bindAccountMgmtEvents(container) {
-  ['Google', 'Kakao', 'Naver'].forEach(name => {
-    container.querySelector(`#link${name}Btn`)?.addEventListener('click', async () => {
-      try {
-        const res = await BackendHooks.linkSocialAccount(name.toLowerCase());
-        alert(res.message || `${name} 연동은 준비 중입니다.`);
-      } catch {
-        alert(`${name} 연동에 실패했습니다.`);
-      }
-    });
+  container.querySelector('#linkKakaoBtn')?.addEventListener('click', () => {
+    BackendHooks.kakaoLogin();
   });
 
   container.querySelector('#logoutAllBtn')?.addEventListener('click', () => {
@@ -640,16 +630,12 @@ function openSignupModal(onSuccess) {
 function renderLoggedInView(container) {
   _contactCounter = 0;
 
-  const userType  = TokenManager.getUserType();
-  const nickname  = TokenManager.getNickname();
-  const email     = TokenManager.getEmail();
-  const isGuest   = userType === 'GST';
-  const isMember  = userType === 'MEM';
+  const userType = TokenManager.getUserType();
+  const nickname = TokenManager.getNickname();
+  const email    = TokenManager.getEmail();
 
-  const badgeStyle = isGuest
-    ? 'background:rgba(255,200,0,0.15); color:#c8a000;'
-    : 'background:rgba(80,180,120,0.15); color:#2a9d5c;';
-  const badgeText = isGuest ? '게스트' : '회원';
+  const badgeText  = userType === 'KKO' ? '카카오 회원' : '이메일 회원';
+  const badgeStyle = 'background:rgba(80,180,120,0.15); color:#2a9d5c;';
 
   const sectionTitle = (text) => `<p class="settings-section-title">${text}</p>`;
 
@@ -667,24 +653,10 @@ function renderLoggedInView(container) {
         </span>
       </div>
 
-      <!-- 게스트 전용: 업그레이드 안내 -->
-      ${isGuest ? `
-        <div class="card-base p-16-24" style="text-align:center; margin-bottom:16px;">
-          <p class="settings-description m-0 fs-13">
-            게스트 세션은 <b>24시간 후 만료</b>됩니다.<br>
-            회원가입 후 여행 아카이브를 영구 보관하세요.
-          </p>
-          <div style="display:flex; gap:10px; margin-top:14px;">
-            <button class="btn-base btn-secondary w-full" id="guestSignupBtn">회원가입</button>
-            <button class="btn-base btn-primary w-full" id="logoutBtn">로그아웃</button>
-          </div>
-        </div>
-      ` : `
-        <div style="text-align:right; margin-bottom:8px;">
-          <button class="btn-base btn-secondary" id="logoutBtn"
-            style="height:36px; padding:0 16px; font-size:13px;">로그아웃</button>
-        </div>
-      `}
+      <div style="text-align:right; margin-bottom:8px;">
+        <button class="btn-base btn-secondary" id="logoutBtn"
+          style="height:36px; padding:0 16px; font-size:13px;">로그아웃</button>
+      </div>
 
       <!-- 개인 설정 -->
       ${sectionTitle('개인 설정')}
@@ -692,11 +664,9 @@ function renderLoggedInView(container) {
       ${buildStyleHTML()}
       ${buildTravelStyleHTML()}
 
-      <!-- 계정 관리 (정회원만) -->
-      ${isMember ? `
-        ${sectionTitle('계정 관리')}
-        ${buildAccountMgmtHTML()}
-      ` : ''}
+      <!-- 계정 관리 -->
+      ${sectionTitle('계정 관리')}
+      ${buildAccountMgmtHTML(userType)}
 
     </div>
   `;
@@ -708,7 +678,7 @@ function renderLoggedInView(container) {
   bindProfileEvents(container);
   bindStyleEvents(container);
   bindTravelStyleEvents(container);
-  if (isMember) bindAccountMgmtEvents(container);
+  bindAccountMgmtEvents(container);
 
   // 로그아웃
   container.querySelector('#logoutBtn')?.addEventListener('click', async (e) => {
@@ -717,20 +687,6 @@ function renderLoggedInView(container) {
     await BackendHooks.logout();
     document.dispatchEvent(new CustomEvent('ta:logout'));
     renderLoginView(container);
-  });
-
-  // 게스트 → 회원가입
-  container.querySelector('#guestSignupBtn')?.addEventListener('click', () => {
-    openSignupModal(async (email, pw) => {
-      try {
-        await BackendHooks.login(email, pw);
-        const profile = await BackendHooks.getMyProfile();
-        if (profile) TokenManager.setUserInfo({ nickname: profile.nickname || '', email: profile.email || '' });
-        renderLoggedInView(container);
-      } catch {
-        renderLoginView(container);
-      }
-    });
   });
 
   // 서버에서 설정 불러오기
@@ -771,7 +727,7 @@ function renderLoginView(container) {
       }
       const profile = await BackendHooks.getMyProfile();
       if (profile) TokenManager.setUserInfo({ nickname: profile.nickname || '', email: profile.email || '' });
-      // 로그인 완료 → 홈으로 이동 (계획 카드 노출)
+      document.dispatchEvent(new CustomEvent('ta:login'));
       window.location.hash = '#/';
     } catch (err) {
       if (loginBtn) { loginBtn.disabled = false; loginBtn.textContent = '로그인'; }
@@ -783,30 +739,9 @@ function renderLoginView(container) {
   loginPwInput?.addEventListener('keydown', (e) => e.key === 'Enter' && handleLogin());
   loginBtn?.addEventListener('click', handleLogin);
 
-  // 게스트 로그인
-  document.getElementById('guestLoginBtn')?.addEventListener('click', async (e) => {
-    e.target.disabled = true;
-    e.target.textContent = '연결 중...';
-    try {
-      await BackendHooks.guestLogin();
-      window.location.hash = '#/';
-    } catch {
-      e.target.disabled = false;
-      e.target.textContent = '게스트로 계속하기';
-      alert('게스트 로그인에 실패했습니다.');
-    }
-  });
-
-  // SNS 로그인
-  ['google', 'kakao', 'naver'].forEach(provider => {
-    document.getElementById(`${provider}LoginBtn`)?.addEventListener('click', async () => {
-      try {
-        const res = await BackendHooks.socialLogin(provider);
-        alert(res.message || `${provider} 로그인은 준비 중입니다.`);
-      } catch {
-        alert(`${provider} 연동에 실패했습니다.`);
-      }
-    });
+  // 카카오 로그인 — 백엔드 OAuth 인가 URL로 리다이렉트
+  document.getElementById('kakaoLoginBtn')?.addEventListener('click', () => {
+    BackendHooks.kakaoLogin();
   });
 
   // 회원가입
@@ -816,6 +751,7 @@ function renderLoginView(container) {
         await BackendHooks.login(email, pw);
         const profile = await BackendHooks.getMyProfile();
         if (profile) TokenManager.setUserInfo({ nickname: profile.nickname || '', email: profile.email || '' });
+        document.dispatchEvent(new CustomEvent('ta:login'));
         window.location.hash = '#/';
       } catch {
         renderLoginView(container);
